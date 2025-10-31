@@ -1,0 +1,13 @@
+[dependencies]
+base = "0.13.2"
+
+[package]
+name = "base16"
+version = "1.0.0"
+description = "Encode decode base16 / hex strings"
+repository = "https://github.com/diodechain/motoko_base16"
+keywords = [ "base16", "hex" ]
+license = "MIT"
+
+[dev-dependencies]
+test = "2.0.0"

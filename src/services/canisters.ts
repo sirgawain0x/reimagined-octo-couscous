@@ -152,9 +152,11 @@ export async function createPortfolioActor(): Promise<PortfolioCanister> {
           amount: IDL.Nat64,
           value: IDL.Float64,
         })),
-      })], ["query"]),
-      getBalance: IDL.Func([IDL.Principal, IDL.Text], [IDL.Nat64], ["query"]),
-      getTotalValue: IDL.Func([IDL.Principal], [IDL.Float64], ["query"]),
+      })], []),
+      getBalance: IDL.Func([IDL.Principal, IDL.Text], [IDL.Nat64], []),
+      getTotalValue: IDL.Func([IDL.Principal], [IDL.Float64], []),
+      setRewardsCanister: IDL.Func([IDL.Principal], [], []),
+      setLendingCanister: IDL.Func([IDL.Principal], [], []),
     })
     
     return createActorUtil<PortfolioCanister>(canisterId, idlFactory)

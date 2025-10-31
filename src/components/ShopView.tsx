@@ -1,11 +1,12 @@
 import { ArrowRight } from "lucide-react"
 import { useRewards } from "@/hooks/useRewards"
+import { logInfo } from "@/utils/logger"
 
 function ShopView() {
   const { stores, isLoading } = useRewards()
 
   function handleShopNow(storeName: string) {
-    console.log(`User is shopping at ${storeName}. Tracking for rewards...`)
+    logInfo("User initiated shopping", { storeName })
     // In a real app, this would open a tracked link and call trackPurchase when purchase completes
     // const { trackPurchase } = useRewards()
     // await trackPurchase(storeId, purchaseAmount)

@@ -22,9 +22,15 @@ export default {
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
       },
+      // Add support for Shadcn UI animations
+      borderRadius: {
+        lg: 'var(--radius)',
+        md: 'calc(var(--radius) - 2px)',
+        sm: 'calc(var(--radius) - 4px)',
+      },
     },
   },
   darkMode: "class",
-  plugins: [nextui()],
+  plugins: [nextui(), require("tailwindcss-animate")],
 }
 

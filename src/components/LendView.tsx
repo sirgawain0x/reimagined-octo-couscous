@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { useLending } from "@/hooks/useLending"
+import { logError } from "@/utils/logger"
 
 function LendView() {
   const { assets, deposits, isLoading, deposit } = useLending()
@@ -13,7 +14,7 @@ function LendView() {
   async function handleLend(asset: { id: string; symbol: string }) {
     const amount = lendAmount[asset.id]
     if (!amount || parseFloat(amount) <= 0) {
-      console.error("Invalid amount")
+      logError("Invalid amount", new Error(`Amount must be greater than 0, got ${amount}`))
       return
     }
 
@@ -24,7 +25,7 @@ function LendView() {
         setLendAmount((prev) => ({ ...prev, [asset.id]: "" }))
       }
     } catch (error) {
-      console.error("Error lending:", error)
+      logError("Error lending", error as Error, { asset: asset.symbol, amount })
     } finally {
       setIsProcessing(null)
     }

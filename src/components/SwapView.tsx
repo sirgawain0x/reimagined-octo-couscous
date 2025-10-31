@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { ArrowDownUp, ArrowRight, Info } from "lucide-react"
 import { useSwap } from "@/hooks/useSwap"
+import { logError } from "@/utils/logger"
 
 const TOKENS = [
   { symbol: "ckBTC", name: "Chain-Key Bitcoin", decimals: 8, icon: "₿" },
@@ -54,7 +55,7 @@ export default function SwapView() {
         // Show success message
       }
     } catch (error) {
-      console.error("Swap failed:", error)
+      logError("Swap failed", error as Error, { poolId: selectedPool, fromToken, amount: fromAmount })
     } finally {
       setIsSwapping(false)
     }

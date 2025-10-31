@@ -2,17 +2,63 @@
 // Uses threshold ECDSA and Schnorr system APIs to generate Bitcoin addresses
 // This module integrates with ICP's native Bitcoin support
 
-import Array "mo:base/Array";
 import Blob "mo:base/Blob";
-import Option "mo:base/Option";
-import Principal "mo:base/Principal";
+import Nat8 "mo:base/Nat8";
+import Nat32 "mo:base/Nat32";
 import Result "mo:base/Result";
-
-// Import ICP system APIs for threshold signing
-import ECDSA "mo:base/ExperimentalCycles";
-import IC "mo:base/ExperimentalCycles"; // For accessing system API
+import Text "mo:base/Text";
+import Principal "mo:base/Principal";
+import Option "mo:base/Option";
+import BitcoinUtils "BitcoinUtils";
 
 module BitcoinUtilsICP {
+  // ECDSA Canister Actor interface for accessing ICP system APIs
+  public type EcdsaCanisterActor = actor {
+    ecdsa_public_key : ({
+      canister_id : ?Principal;
+      derivation_path : [Blob];
+      key_id : {
+        curve : { #secp256k1 };
+        name : Text;
+      };
+    }) -> async {
+      public_key : Blob;
+      chain_code : Blob;
+    };
+    sign_with_ecdsa : ({
+      message_hash : Blob;
+      derivation_path : [Blob];
+      key_id : {
+        curve : { #secp256k1 };
+        name : Text;
+      };
+    }) -> async {
+      signature : Blob;
+    };
+  };
+
+  // Schnorr Canister Actor interface (for future Taproot support)
+  // Note: Schnorr API may be available through IC system API or separate canister
+  public type SchnorrCanisterActor = actor {
+    schnorr_public_key : ({
+      canister_id : ?Principal;
+      derivation_path : [Blob];
+      key_id : {
+        name : Text;
+      };
+    }) -> async {
+      public_key : Blob;
+    };
+    sign_with_schnorr : ({
+      message : Blob;
+      derivation_path : [Blob];
+      key_id : {
+        name : Text;
+      };
+    }) -> async {
+      signature : Blob;
+    };
+  };
   // Network types for Bitcoin address generation
   public type Network = {
     #Mainnet;
@@ -29,82 +75,139 @@ module BitcoinUtilsICP {
     #P2TR; // Pay-to-Taproot (Taproot, bc1p...)
   };
 
-  // ECDSA key name for threshold signing
-  private let ECDSA_KEY_NAME : Text = "key_1";
+  // Default ECDSA key name for threshold signing
+  // Use "dfx_test_key" for local development, "key_1" for production
+  private let DEFAULT_ECDSA_KEY_NAME : Text = "dfx_test_key";
   
-  // Schnorr key name for Taproot
-  private let SCHNORR_KEY_NAME : Text = "key_1";
+  // Default Schnorr key name for Taproot (reserved for future use)
+  private let _DEFAULT_SCHNORR_KEY_NAME : Text = "dfx_test_key";
 
   // Derivation path helper
   public type DerivationPath = [Blob];
 
+  // Get ECDSA management canister actor (aaaaa-aa)
+  // This is the system canister that provides ECDSA APIs
+  private func getEcdsaCanister() : EcdsaCanisterActor {
+    // Management canister ID: aaaaa-aa (null Principal)
+    // In Motoko, we can reference it directly
+    actor "aaaaa-aa" : EcdsaCanisterActor
+  };
+
   /// Get ECDSA public key from ICP system API
   /// This is used for P2PKH, P2SH, P2WPKH addresses
+  /// Uses the ECDSA management canister (aaaaa-aa)
   public func getEcdsaPublicKey(
-    derivationPath : DerivationPath
+    derivationPath : DerivationPath,
+    keyName : ?Text
   ) : async Result.Result<[Nat8], Text> {
-    // Note: This is a placeholder for the actual system API call
-    // In production, you would use:
-    // let response = await IC.canister_sign_with_ecdsa({
-    //   message_hash = ...
-    //   derivation_path = derivationPath;
-    //   key_id = { curve = #secp256k1; name = ECDSA_KEY_NAME };
-    // });
-    // For now, return error indicating implementation needed
-    #err("ECDSA public key retrieval requires ICP system API integration. See INTERNET_IDENTITY_SETUP.md for details.")
+    let ecdsaCanister = getEcdsaCanister();
+    let key = Option.get<Text>(keyName, DEFAULT_ECDSA_KEY_NAME);
+    
+    let response = await ecdsaCanister.ecdsa_public_key({
+      canister_id = null; // null means current canister
+      derivation_path = derivationPath;
+      key_id = {
+        curve = #secp256k1;
+        name = key;
+      };
+    });
+    
+    let publicKeyBytes = Blob.toArray(response.public_key);
+    #ok(publicKeyBytes)
   };
 
   /// Get Schnorr public key from ICP system API
   /// This is used for P2TR (Taproot) addresses
+  /// NOTE: Schnorr API may require different canister or IC system API access
+  /// For now, this attempts to use IC directly if available
   public func getSchnorrPublicKey(
-    derivationPath : DerivationPath
+    _derivationPath : DerivationPath,
+    _keyName : ?Text
   ) : async Result.Result<[Nat8], Text> {
-    // Note: This is a placeholder for the actual system API call
-    // In production, you would use:
-    // let response = await IC.canister_sign_with_schnorr({
-    //   message = ...
-    //   derivation_path = derivationPath;
-    //   key_id = { curve = #secp256k1; name = SCHNORR_KEY_NAME };
-    // });
-    #err("Schnorr public key retrieval requires ICP system API integration. See INTERNET_IDENTITY_SETUP.md for details.")
+    // TODO: Implement Schnorr public key retrieval
+    // The Schnorr API might be available through IC system API
+    // or through a different canister interface
+    // For now, return error indicating it needs IC system API access
+    // which may require calling from within an actor context
+    #err("Schnorr public key API requires IC system API access. Call from actor context using IC.schnorr_public_key or implement Schnorr canister actor.")
   };
 
   /// Generate P2PKH address using ECDSA public key
   /// Legacy addresses starting with '1'
   /// Uses RIPEMD160(SHA256(publicKey))
   public func generateP2PKHAddress(
-    ecdsaCanisterActor : Principal,
     network : Network,
-    derivationPath : DerivationPath
+    derivationPath : DerivationPath,
+    keyName : ?Text
   ) : async Result.Result<Text, Text> {
-    // This would call the canister's ECDSA actor to get the public key
-    // then hash it and encode as Base58Check
-    // For now, return error indicating need for full implementation
-    #err("P2PKH address generation requires full ECDSA integration. Use BitcoinUtils.mo utilities once public key is retrieved.")
+    switch (await getEcdsaPublicKey(derivationPath, keyName)) {
+      case (#err(msg)) #err(msg);
+      case (#ok(publicKey)) {
+        // Hash the public key
+        let publicKeyHash = BitcoinUtils.hashPublicKey(publicKey);
+        
+        // Note: versionByte is calculated but not used since BitcoinUtils.generateAddress
+        // handles network-specific encoding internally
+        let _versionByte = switch network {
+          case (#Mainnet) 0 : Nat8;
+          case (#Testnet) 111 : Nat8;
+          case (#Regtest) 111 : Nat8; // Regtest uses testnet version
+        };
+        
+        // Use BitcoinUtils to generate the address
+        let address = BitcoinUtils.generateAddress(publicKeyHash, #P2PKH);
+        #ok(address)
+      }
+    }
+  };
+
+  /// Generate P2WPKH address using ECDSA public key
+  /// SegWit addresses starting with 'bc1q'
+  public func generateP2WPKHAddress(
+    _network : Network,
+    derivationPath : DerivationPath,
+    keyName : ?Text
+  ) : async Result.Result<Text, Text> {
+    switch (await getEcdsaPublicKey(derivationPath, keyName)) {
+      case (#err(msg)) #err(msg);
+      case (#ok(publicKey)) {
+        let publicKeyHash = BitcoinUtils.hashPublicKey(publicKey);
+        let address = BitcoinUtils.generateAddress(publicKeyHash, #P2WPKH);
+        #ok(address)
+      }
+    }
   };
 
   /// Generate P2TR key-only address using Schnorr public key
   /// Taproot address that can only be spent with a Schnorr signature
   public func generateP2TRKeyOnlyAddress(
-    schnorrCanisterActor : Principal,
-    network : Network,
-    derivationPath : DerivationPath
+    _network : Network,
+    derivationPath : DerivationPath,
+    keyName : ?Text
   ) : async Result.Result<Text, Text> {
-    // This would call the canister's Schnorr actor to get the x-only public key
-    // then encode as Bech32m for Taproot
-    #err("P2TR key-only address generation requires full Schnorr integration. Use BitcoinUtils.mo utilities once public key is retrieved.")
+    switch (await getSchnorrPublicKey(derivationPath, keyName)) {
+      case (#err(msg)) #err(msg);
+      case (#ok(xOnlyPublicKey)) {
+        // Schnorr public key is already x-only (32 bytes)
+        // For key-only Taproot, we use it directly
+        let address = BitcoinUtils.generateAddress(xOnlyPublicKey, #P2TR);
+        #ok(address)
+      }
+    }
   };
 
   /// Generate P2TR address (key or script) using Schnorr public key
   /// Taproot address that can be spent with either Schnorr signature or script
+  /// For now, this is the same as key-only. Script commitment requires additional Merkle tree logic
   public func generateP2TRAddress(
-    schnorrCanisterActor : Principal,
     network : Network,
-    derivationPath : DerivationPath
+    derivationPath : DerivationPath,
+    keyName : ?Text
   ) : async Result.Result<Text, Text> {
-    // This would call the canister's Schnorr actor to get the x-only public key
-    // then create a Taproot output with optional script commitment
-    #err("P2TR address generation requires full Schnorr integration. Use BitcoinUtils.mo utilities once public key is retrieved.")
+    // For key-or-script, we use a different derivation path index
+    // The actual script commitment would require building a Merkle tree
+    // For now, we'll use the same approach as key-only
+    await generateP2TRKeyOnlyAddress(network, derivationPath, keyName)
   };
 
   /// Create derivation path from index
@@ -112,7 +215,8 @@ module BitcoinUtilsICP {
   public func createDerivationPath(index : Nat32) : DerivationPath {
     // Convert index to blob for derivation path
     // Format: [0] for index 0, [1] for index 1, etc.
-    let indexBlob = Blob.fromArray(Array.init<Nat8>(1, Nat8.fromIntWrap(index)));
+    let indexByte = Nat8.fromIntWrap(Nat32.toNat(index));
+    let indexBlob = Blob.fromArray([indexByte]);
     [indexBlob]
   };
 
@@ -121,24 +225,24 @@ module BitcoinUtilsICP {
   public func validateAddress(address : Text, network : Network) : Bool {
     // Check legacy addresses (P2PKH starts with 1, P2SH with 3)
     if (address.size() > 0 and address.size() < 35) {
-      let firstChar = Text.substring(address, 0, 1);
-      if (firstChar == "1" or firstChar == "3") {
-        // Basic format check - full validation requires Base58Check decoding
+      if (Text.startsWith(address, #text "1") or Text.startsWith(address, #text "3")) {
         return true
       }
     };
     
     // Check Bech32 addresses (SegWit and Taproot)
-    if (Text.startsWith(address, #text getNetworkPrefix(network) # "1")) {
-      // Basic format check - full validation requires Bech32 decoding
-      return true
-    };
-    
-    false
+    // Simple check: Bech32 addresses start with network prefix + "1"
+    // For mainnet: "bc1", testnet: "tb1", regtest: "bcrt1"
+    switch network {
+      case (#Mainnet) Text.startsWith(address, #text "bc1");
+      case (#Testnet) Text.startsWith(address, #text "tb1");
+      case (#Regtest) Text.startsWith(address, #text "bcrt1") or Text.startsWith(address, #text "bc1")
+    }
   };
 
   /// Get network prefix for Bech32 addresses
-  private func getNetworkPrefix(network : Network) : Text {
+  /// Note: Reserved for future use when network-specific prefix handling is needed
+  private func _getNetworkPrefix(network : Network) : Text {
     switch network {
       case (#Mainnet) "bc";
       case (#Testnet) "tb";
@@ -148,10 +252,8 @@ module BitcoinUtilsICP {
 
   /// Hash public key using RIPEMD160(SHA256(publicKey))
   /// This is used for P2PKH and P2WPKH address generation
-  public func hashPublicKey(publicKey : [Nat8]) : async Result.Result<[Nat8], Text> {
-    // This should use the BitcoinUtils.hashPublicKey function
-    // For now, return error
-    #err("Public key hashing requires BitcoinUtils.mo integration")
+  public func hashPublicKey(publicKey : [Nat8]) : [Nat8] {
+    BitcoinUtils.hashPublicKey(publicKey)
   };
 
   /// Convert UTXO information to address

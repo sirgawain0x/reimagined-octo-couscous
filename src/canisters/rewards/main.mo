@@ -1,10 +1,12 @@
 import Array "mo:base/Array";
+import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
 import Float "mo:base/Float";
 import HashMap "mo:base/HashMap";
 import Hash "mo:base/Hash";
 import Iter "mo:base/Iter";
 import Nat "mo:base/Nat";
+import Nat8 "mo:base/Nat8";
 import Nat32 "mo:base/Nat32";
 import Nat64 "mo:base/Nat64";
 import Option "mo:base/Option";
@@ -12,6 +14,7 @@ import Principal "mo:base/Principal";
 import Result "mo:base/Result";
 import Time "mo:base/Time";
 import Types "./Types";
+import BitcoinUtilsICP "../shared/BitcoinUtilsICP";
 
 // Helper functions for equality and hashing (must be defined before use)
 func storeIdEqual(a : Types.StoreId, b : Types.StoreId) : Bool { a == b };
@@ -39,6 +42,9 @@ persistent actor RewardsCanister {
   private transient var purchases : Buffer.Buffer<PurchaseRecord> = Buffer.Buffer(100);
   private transient var nextStoreId : StoreId = 1;
   private transient var nextPurchaseId : Nat64 = 1;
+
+  // Admin management (transient - will be lost on upgrade, first caller becomes admin)
+  private transient var admins : HashMap.HashMap<Principal, Bool> = HashMap.HashMap(0, Principal.equal, Principal.hash);
 
   // Bitcoin API integration placeholder
   private transient let BTC_API_ENABLED : Bool = false;
@@ -116,17 +122,25 @@ persistent actor RewardsCanister {
     Option.get<Nat64>(userRewards.get(userId), 0)
   };
 
-  /// Get user's reward address (placeholder)
-  public query func getUserRewardAddress(_userId : Principal) : async Result<Text, Text> {
-    if (BTC_API_ENABLED) {
-      // TODO: Implement actual Bitcoin address generation using BIP32 derivation
-      #ok("bc1qplaceholderaddress")
-    } else {
-      #err("Bitcoin integration not enabled")
-    }
+  /// Get user's reward address using BitcoinUtilsICP
+  /// Generates a P2WPKH address for the user (SegWit for lower fees)
+  public func getUserRewardAddress(userId : Principal) : async Result<Text, Text> {
+    if (not BTC_API_ENABLED) {
+      return #err("Bitcoin integration not enabled")
+    };
+    
+    // Use user's principal to derive a unique index
+    // For now, use a simple hash of the principal as the derivation index
+    // In production, you might want a more sophisticated mapping
+    let principalBytes = Blob.toArray(Principal.toBlob(userId));
+    let index = Nat32.fromNat(Array.foldLeft<Nat8, Nat>(principalBytes, 0, func(acc, b) { acc + Nat8.toNat(b) }) % 2147483647);
+    let derivationPath = BitcoinUtilsICP.createDerivationPath(index);
+    
+    // Generate P2WPKH address (SegWit for lower transaction fees)
+    await BitcoinUtilsICP.generateP2WPKHAddress(#Regtest, derivationPath, null)
   };
 
-  /// Claim rewards (placeholder for Bitcoin transaction)
+  /// Claim rewards (Bitcoin transaction implementation pending)
   public shared (msg) func claimRewards() : async Result<BitcoinTx, Text> {
     let userId = msg.caller;
     let rewards = Option.get<Nat64>(userRewards.get(userId), 0);
@@ -137,11 +151,18 @@ persistent actor RewardsCanister {
 
     if (BTC_API_ENABLED) {
       // TODO: Implement actual Bitcoin transaction
-      // 1. Get Bitcoin address from getUserRewardAddress
-      // 2. Build transaction
-      // 3. Sign transaction
-      // 4. Broadcast via ICP Bitcoin API
-      #err("Bitcoin transaction implementation pending")
+      // 1. Get user's reward address
+      let addressResult = await getUserRewardAddress(userId);
+      switch addressResult {
+        case (#err(msg)) return #err("Failed to get reward address: " # msg);
+        case (#ok(address)) {
+          // 2. Build transaction with UTXO selection
+          // 3. Sign transaction using threshold ECDSA
+          // 4. Broadcast via ICP Bitcoin API
+          // For now, return error indicating implementation needed
+          #err("Bitcoin transaction implementation pending. Address: " # address)
+        }
+      }
     } else {
       // For now, just reset rewards (mock behavior)
       userRewards.put(userId, 0);
@@ -149,9 +170,29 @@ persistent actor RewardsCanister {
     }
   };
 
-  /// Get canister Bitcoin address (placeholder)
-  public query func getCanisterRewardAddress() : async Text {
-    "bc1qcanisteraddressplaceholder"
+  /// Get canister Bitcoin address
+  /// Returns P2PKH address for the canister (index 0)
+  public func getCanisterRewardAddress() : async Result<Text, Text> {
+    if (not BTC_API_ENABLED) {
+      return #err("Bitcoin integration not enabled")
+    };
+    
+    // Use index 0 for the main canister address
+    let derivationPath = BitcoinUtilsICP.createDerivationPath(0);
+    
+    // Generate P2PKH address for main canister address
+    await BitcoinUtilsICP.generateP2PKHAddress(#Regtest, derivationPath, null)
+  };
+
+  /// Get canister Taproot address (P2TR)
+  /// Modern Taproot address for lower fees and better privacy
+  public func getCanisterTaprootAddress() : async Result<Text, Text> {
+    if (not BTC_API_ENABLED) {
+      return #err("Bitcoin integration not enabled")
+    };
+    
+    let derivationPath = BitcoinUtilsICP.createDerivationPath(2); // Index 2 for Taproot
+    await BitcoinUtilsICP.generateP2TRKeyOnlyAddress(#Regtest, derivationPath, null)
   };
 
   /// Get purchase history for a user
@@ -167,11 +208,41 @@ persistent actor RewardsCanister {
     Buffer.toArray(purchases)
   };
 
+  /// Add an admin (only existing admins can add new admins)
+  public shared (msg) func addAdmin(newAdmin : Principal) : async Result<(), Text> {
+    if (not isAdmin(msg.caller)) {
+      return #err("Unauthorized: Only admins can add other admins")
+    };
+    admins.put(newAdmin, true);
+    #ok(())
+  };
+
+  /// Remove an admin (only admins can remove other admins)
+  public shared (msg) func removeAdmin(adminToRemove : Principal) : async Result<(), Text> {
+    if (not isAdmin(msg.caller)) {
+      return #err("Unauthorized: Only admins can remove other admins")
+    };
+    if (Principal.equal(msg.caller, adminToRemove)) {
+      return #err("Cannot remove yourself as admin")
+    };
+    admins.delete(adminToRemove);
+    #ok(())
+  };
+
+  /// Check if a principal is an admin
+  public query func isAdminPrincipal(principal : Principal) : async Bool {
+    isAdmin(principal)
+  };
+
   // Helper functions
-  private func isAdmin(_principal : Principal) : Bool {
-    // TODO: Implement admin check
-    // For now, allow all calls in development
-    true
+  private func isAdmin(principal : Principal) : Bool {
+    // If no admins exist, allow the first caller to become admin (initialization)
+    if (admins.size() == 0) {
+      admins.put(principal, true);
+      true
+    } else {
+      Option.isSome(admins.get(principal))
+    }
   };
 };
 

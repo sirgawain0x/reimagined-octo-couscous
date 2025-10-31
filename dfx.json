@@ -29,6 +29,9 @@
     }
   },
   "defaults": {
+    "build": {
+      "packtool": "mops sources"
+    },
     "bitcoin": {
       "enabled": true,
       "nodes": ["127.0.0.1:18444"]

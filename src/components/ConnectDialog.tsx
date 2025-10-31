@@ -1,6 +1,13 @@
 import { useState } from "react"
-import { Modal, ModalContent, ModalHeader, ModalBody, Button, Spinner } from "@nextui-org/react"
-import { Bitcoin } from "lucide-react"
+import { Bitcoin, Loader2 } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 import { loginWithBitcoinWallet, setBitcoinIdentity } from "@/services/icp"
 import { logError, logInfo } from "@/utils/logger"
 import type { Principal } from "@dfinity/principal"
@@ -12,10 +19,10 @@ interface ConnectDialogProps {
 }
 
 function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps) {
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState<string | null>(null)
 
   async function handleWalletSelect(provider: string) {
-    setLoading(true)
+    setLoading(provider)
     try {
       logInfo(`Connecting to ${provider} wallet`)
       
@@ -35,60 +42,64 @@ function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps) {
       logError(`Error connecting to ${provider}`, error as Error)
       alert(`Failed to connect to ${provider} wallet. Please make sure the wallet extension is installed and unlocked.`)
     } finally {
-      setLoading(false)
+      setLoading(null)
     }
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="sm" className="z-50">
-      <ModalContent>
-        <ModalHeader className="text-xl font-bold">Connect Bitcoin Wallet</ModalHeader>
-        <ModalBody className="pb-6">
-          <p className="text-gray-400 text-sm mb-4">
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Connect Bitcoin Wallet</DialogTitle>
+          <DialogDescription>
             Select your Bitcoin wallet to sign in:
-          </p>
-          
-          <div className="space-y-3">
-            <Button
-              onPress={() => handleWalletSelect("wizz")}
-              isDisabled={loading}
-              className="w-full"
-              variant="bordered"
-              size="lg"
-            >
-              Wizz Wallet
-            </Button>
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="space-y-3 py-4">
+          <Button
+            onClick={() => handleWalletSelect("wizz")}
+            disabled={loading !== null}
+            className="w-full"
+            variant="outline"
+            size="lg"
+          >
+            {loading === "wizz" ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : null}
+            Wizz Wallet
+          </Button>
 
-            <Button
-              onPress={() => handleWalletSelect("unisat")}
-              isDisabled={loading}
-              className="w-full"
-              variant="bordered"
-              size="lg"
-            >
-              Unisat Wallet
-            </Button>
+          <Button
+            onClick={() => handleWalletSelect("unisat")}
+            disabled={loading !== null}
+            className="w-full"
+            variant="outline"
+            size="lg"
+          >
+            {loading === "unisat" ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : null}
+            Unisat Wallet
+          </Button>
 
-            <Button
-              onPress={() => handleWalletSelect("BitcoinProvider")}
-              isDisabled={loading}
-              className="w-full"
-              variant="bordered"
-              size="lg"
-            >
-              <Bitcoin className="w-5 h-5 mr-2" />
-              Xverse Wallet
-            </Button>
-          </div>
-
-          {loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
-              <Spinner size="lg" />
-            </div>
-          )}
-        </ModalBody>
-      </ModalContent>
-    </Modal>
+          <Button
+            onClick={() => handleWalletSelect("BitcoinProvider")}
+            disabled={loading !== null}
+            className="w-full"
+            variant="outline"
+            size="lg"
+          >
+            {loading === "BitcoinProvider" ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Bitcoin className="mr-2 h-5 w-5" />
+            )}
+            Xverse Wallet
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

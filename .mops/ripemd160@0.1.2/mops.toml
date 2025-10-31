@@ -1,0 +1,22 @@
+[dependencies]
+base = "0.16.0"
+
+[package]
+name = "ripemd160"
+version = "0.1.2"
+description = "A pure Motoko implementation of the RIPEMD‑160 cryptographic hash function, compatible with Internet Computer canisters."
+repository = "https://github.com/codecustard/ripemd160"
+keywords = [
+  "ripemd160",
+  "hash",
+  "crypto",
+  "cryptography",
+  "bitcoin",
+  "kaspa",
+  "address",
+  "hashing"
+]
+license = "MIT"
+
+[toolchain]
+moc = "0.16.0"

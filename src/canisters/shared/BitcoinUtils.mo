@@ -1,14 +1,13 @@
-import Base58 "mo:base58/Base58";
-import Base58Check "mo:base58check/Base58Check";
-import Hmac "mo:hmac/Hmac";
-import Ripemd160 "mo:ripemd160/Ripemd160";
-import Sha256 "mo:sha256/Sha256";
-import Jacobi "mo:ec/Jacobi";
-import Affine "mo:ec/Affine";
-import Curves "mo:ec/Curves";
-import Bip32 "mo:bip32/Bip32";
-import Bech32 "mo:bech32/Bech32";
-import Segwit "mo:segwit/Segwit";
+import Base58Check "mo:bitcoin/Base58Check";
+import Ripemd160 "mo:bitcoin/Ripemd160";
+import Sha256 "mo:sha2/Sha256";
+import Blob "mo:base/Blob";
+import Bech32 "mo:bitcoin/Bech32";
+import Segwit "mo:bitcoin/Segwit";
+import Array "mo:base/Array";
+import Text "mo:base/Text";
+import Nat8 "mo:base/Nat8";
+import Char "mo:base/Char";
 
 module BitcoinUtils {
   public type AddressType = {
@@ -51,52 +50,95 @@ module BitcoinUtils {
 
   /// Generate P2WPKH (Pay-to-Witness-PubKey-Hash) address
   func generateP2WPKH(publicKeyHash : [Nat8]) : Text {
-    // Bech32 encode for mainnet
-    Bech32.encode("bc", publicKeyHash, #BECH32)
+    // Segwit encode for mainnet (version 0 witness program)
+    let witnessProgram = {
+      version = 0 : Nat8;
+      program = publicKeyHash;
+    };
+    switch (Segwit.encode("bc", witnessProgram)) {
+      case (#ok(address)) address;
+      case (#err(_)) ""; // Fallback - should not happen
+    }
   };
 
   /// Generate P2WSH (Pay-to-Witness-Script-Hash) address
   func generateP2WSH(scriptHash : [Nat8]) : Text {
-    // Bech32 encode for mainnet
-    Bech32.encode("bc", scriptHash, #BECH32)
+    // Segwit encode for mainnet (version 0 witness program)
+    let witnessProgram = {
+      version = 0 : Nat8;
+      program = scriptHash;
+    };
+    switch (Segwit.encode("bc", witnessProgram)) {
+      case (#ok(address)) address;
+      case (#err(_)) ""; // Fallback - should not happen
+    }
   };
 
   /// Generate P2TR (Pay-to-Taproot) address
   func generateP2TR(xOnlyPublicKey : [Nat8]) : Text {
-    // Generate Taproot address
-    Segwit.encode("bc", xOnlyPublicKey)
+    // Generate Taproot address (version 1 witness program)
+    let witnessProgram = {
+      version = 1 : Nat8;
+      program = xOnlyPublicKey;
+    };
+    switch (Segwit.encode("bc", witnessProgram)) {
+      case (#ok(address)) address;
+      case (#err(_)) ""; // Fallback - should not happen
+    }
   };
 
   /// Hash public key with RIPEMD160(SHA256(key))
   public func hashPublicKey(publicKey : [Nat8]) : [Nat8] {
-    let sha256Hash = Sha256.digest(publicKey);
+    let sha256Hash = Blob.toArray(Sha256.fromArray(#sha256, publicKey));
     let ripemd160 = Ripemd160.Digest();
     ripemd160.write(sha256Hash);
     ripemd160.sum()
   };
 
-  /// Derive HD wallet key path
-  public func deriveKeyPath(
-    masterKey : Bip32.ExtendedPrivateKey,
-    path : Text
-  ) : ?Bip32.ExtendedPrivateKey {
-    masterKey.derivePath(#text path)
-  };
+  /// Derive HD wallet key path (Note: Bitcoin package only supports ExtendedPublicKey)
+  // public func deriveKeyPath(
+  //   masterKey : Bip32.ExtendedPrivateKey,
+  //   path : Text
+  // ) : ?Bip32.ExtendedPrivateKey {
+  //   masterKey.derivePath(#text path)
+  // };
 
   /// Validate Bitcoin address
   public func validateAddress(address : Text) : Bool {
     // Check if it's a Bech32 address (starts with bc1, tb1, or bcrt1)
-    if (address.startsWith("bc1") or address.startsWith("tb1") or address.startsWith("bcrt1")) {
-      switch (Bech32.decode("bc", address)) {
-        case (#ok(_, _)) true;
+    let isBech32 = Text.startsWith(address, #text "bc1") or 
+                   Text.startsWith(address, #text "tb1") or 
+                   Text.startsWith(address, #text "bcrt1");
+    
+    if (isBech32) {
+      switch (Bech32.decode(address)) {
+        case (#ok((_, _, _))) true;
         case (#err(_)) false
       }
     } else {
       // Try Base58Check validation
       switch (Base58Check.decode(address)) {
-        case (#ok(version, _)) version == 0 or version == 111 or version == 5 or version == 196;
-        case (#err(_)) false
+        case (?decoded) {
+          // Version byte is the first byte
+          if (decoded.size() > 0) {
+            let version = decoded[0];
+            version == 0 or version == 111 or version == 5 or version == 196
+          } else {
+            false
+          }
+        };
+        case null false
       }
+    }
+  };
+
+  func nibbleToHex(nibble : Nat8) : Text {
+    switch (nibble) {
+      case 0 "0"; case 1 "1"; case 2 "2"; case 3 "3";
+      case 4 "4"; case 5 "5"; case 6 "6"; case 7 "7";
+      case 8 "8"; case 9 "9"; case 10 "a"; case 11 "b";
+      case 12 "c"; case 13 "d"; case 14 "e"; case 15 "f";
+      case _ "0"
     }
   };
 
@@ -104,7 +146,9 @@ module BitcoinUtils {
   public func bytesToHex(bytes : [Nat8]) : Text {
     var hex = "";
     for (byte in bytes.vals()) {
-      hex #= Nat8.toText(byte / 16, 16) # Nat8.toText(byte % 16, 16)
+      let highNibble = byte >> 4;
+      let lowNibble = byte & 15;
+      hex #= nibbleToHex(highNibble) # nibbleToHex(lowNibble)
     };
     hex
   };
@@ -138,7 +182,7 @@ module BitcoinUtils {
   };
 
   func charToNibble(char : Char) : ?Nat8 {
-    switch (char.toText()) {
+    switch (Char.toText(char)) {
       case ("0") ?0;
       case ("1") ?1;
       case ("2") ?2;

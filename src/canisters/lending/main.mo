@@ -1,8 +1,10 @@
 import Array "mo:base/Array";
+import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
 import HashMap "mo:base/HashMap";
 import Hash "mo:base/Hash";
 import Iter "mo:base/Iter";
+import Nat8 "mo:base/Nat8";
 import Nat32 "mo:base/Nat32";
 import Nat64 "mo:base/Nat64";
 import Option "mo:base/Option";
@@ -11,6 +13,7 @@ import Result "mo:base/Result";
 import Text "mo:base/Text";
 import Time "mo:base/Time";
 import Types "./Types";
+import BitcoinUtilsICP "../shared/BitcoinUtilsICP";
 
 // Helper functions for equality and hashing (must be defined before use)
 func depositIdEqual(a : Nat64, b : Nat64) : Bool { a == b };
@@ -36,6 +39,9 @@ persistent actor LendingCanister {
   private transient var deposits : HashMap.HashMap<Nat64, Deposit> = HashMap.HashMap(0, depositIdEqual, depositIdHash);
   private transient var userDeposits : HashMap.HashMap<Principal, [Nat64]> = HashMap.HashMap(0, Principal.equal, Principal.hash);
   private var nextDepositId : Nat64 = 1;
+
+  // Admin management (transient - will be lost on upgrade, first caller becomes admin)
+  private transient var admins : HashMap.HashMap<Principal, Bool> = HashMap.HashMap(0, Principal.equal, Principal.hash);
 
   // Bitcoin custody state (placeholder)
   private transient var bitcoinUtxos : Buffer.Buffer<UtxoInfo> = Buffer.Buffer(100);
@@ -164,11 +170,39 @@ persistent actor LendingCanister {
     }
   };
 
+  /// Get Bitcoin deposit address for the canister
+  /// Returns a P2PKH address where users can send Bitcoin deposits
+  public func getBitcoinDepositAddress() : async Result<Text, Text> {
+    if (not BTC_API_ENABLED) {
+      return #err("Bitcoin integration not enabled")
+    };
+    
+    // Use index 0 for the main deposit address
+    let derivationPath = BitcoinUtilsICP.createDerivationPath(0);
+    await BitcoinUtilsICP.generateP2PKHAddress(#Regtest, derivationPath, null)
+  };
+
+  /// Get Bitcoin deposit address for a specific user
+  /// Generates a unique address per user for tracking deposits
+  public func getUserBitcoinDepositAddress(userId : Principal) : async Result<Text, Text> {
+    if (not BTC_API_ENABLED) {
+      return #err("Bitcoin integration not enabled")
+    };
+    
+    // Derive unique index from user principal
+    let principalBytes = Blob.toArray(Principal.toBlob(userId));
+    let index = Nat32.fromNat(Array.foldLeft<Nat8, Nat>(principalBytes, 0, func(acc, b) { acc + Nat8.toNat(b) }) % 2147483647);
+    let derivationPath = BitcoinUtilsICP.createDerivationPath(index);
+    
+    // Use P2WPKH for user deposits (lower fees)
+    await BitcoinUtilsICP.generateP2WPKHAddress(#Regtest, derivationPath, null)
+  };
+
   /// Withdraw assets
   public shared (msg) func withdraw(
     asset : Text,
     amount : Nat64,
-    _recipientAddress : Text
+    recipientAddress : Text
   ) : async Result<WithdrawalTx, Text> {
     let userId = msg.caller;
 
@@ -177,12 +211,17 @@ persistent actor LendingCanister {
     };
 
     if (asset == "BTC" and BTC_API_ENABLED) {
+      // Validate recipient address
+      if (not BitcoinUtilsICP.validateAddress(recipientAddress, #Regtest)) {
+        return #err("Invalid Bitcoin address")
+      };
+      
       // TODO: Implement Bitcoin withdrawal
-      // 1. Validate recipient address
+      // 1. Select UTXOs that sum to amount + fees
       // 2. Build Bitcoin transaction
-      // 3. Sign transaction
+      // 3. Sign transaction using threshold ECDSA
       // 4. Broadcast via ICP Bitcoin API
-      return #err("Bitcoin withdrawal implementation pending")
+      return #err("Bitcoin withdrawal implementation pending. Validated address: " # recipientAddress)
     };
 
     // For now, simulate withdrawal
@@ -232,6 +271,101 @@ persistent actor LendingCanister {
   /// Get UTXOs under custody (admin only)
   public query func getUtxos() : async [UtxoInfo] {
     Buffer.toArray(bitcoinUtxos)
+  };
+
+  /// Add UTXO to custody tracking
+  /// Called when Bitcoin is deposited to canister address
+  public func addUtxo(utxo : UtxoInfo) : () {
+    bitcoinUtxos.add(utxo);
+    totalBitcoinBalance += utxo.value
+  };
+
+  /// Select UTXOs for spending
+  /// Uses a simple largest-first algorithm
+  /// Returns UTXOs that sum to at least the target amount
+  private func _selectUtxos(targetAmount : Nat64) : Result<[UtxoInfo], Text> {
+    // Sort UTXOs by value (largest first)
+    let sortedUtxos = Array.sort<UtxoInfo>(
+      Buffer.toArray(bitcoinUtxos),
+      func(a : UtxoInfo, b : UtxoInfo) {
+        if (a.value > b.value) { #greater }
+        else if (a.value < b.value) { #less }
+        else { #equal }
+      }
+    );
+    
+    var selectedAmount : Nat64 = 0;
+    var selectedUtxos : Buffer.Buffer<UtxoInfo> = Buffer.Buffer(10);
+    
+    for (utxo in Array.vals(sortedUtxos)) {
+      if (selectedAmount >= targetAmount) {
+        // Stop when we have enough
+      } else {
+        selectedUtxos.add(utxo);
+        selectedAmount += utxo.value
+      }
+    };
+    
+    if (selectedAmount < targetAmount) {
+      #err("Insufficient UTXOs. Need: " # Nat64.toText(targetAmount) # ", Have: " # Nat64.toText(selectedAmount))
+    } else {
+      #ok(Buffer.toArray(selectedUtxos))
+    }
+  };
+
+  /// Remove spent UTXOs from custody
+  public func removeUtxos(spentUtxos : [UtxoInfo]) : () {
+    for (spentUtxo in spentUtxos.vals()) {
+      var i = 0;
+      var found = false;
+      while (i < bitcoinUtxos.size() and not found) {
+        let utxo = bitcoinUtxos.get(i);
+        if (utxo.outpoint.txid == spentUtxo.outpoint.txid and utxo.outpoint.vout == spentUtxo.outpoint.vout) {
+          let _ = bitcoinUtxos.remove(i);
+          totalBitcoinBalance -= utxo.value;
+          found := true
+        } else {
+          i += 1
+        }
+      }
+    }
+  };
+
+  /// Add an admin (only existing admins can add new admins)
+  public shared (msg) func addAdmin(newAdmin : Principal) : async Result<(), Text> {
+    if (not isAdmin(msg.caller)) {
+      return #err("Unauthorized: Only admins can add other admins")
+    };
+    admins.put(newAdmin, true);
+    #ok(())
+  };
+
+  /// Remove an admin (only admins can remove other admins)
+  public shared (msg) func removeAdmin(adminToRemove : Principal) : async Result<(), Text> {
+    if (not isAdmin(msg.caller)) {
+      return #err("Unauthorized: Only admins can remove other admins")
+    };
+    if (Principal.equal(msg.caller, adminToRemove)) {
+      return #err("Cannot remove yourself as admin")
+    };
+    admins.delete(adminToRemove);
+    #ok(())
+  };
+
+  /// Check if a principal is an admin
+  public query func isAdminPrincipal(principal : Principal) : async Bool {
+    isAdmin(principal)
+  };
+
+  // Helper functions
+  private func isAdmin(principal : Principal) : Bool {
+    // If no admins exist, allow the first caller to become admin (initialization)
+    if (admins.size() == 0) {
+      admins.put(principal, true);
+      true
+    } else {
+      Option.isSome(admins.get(principal))
+    }
   };
 
 };

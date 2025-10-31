@@ -1,5 +1,9 @@
 import { useState, useEffect } from "react"
 import type { LendingAsset, LendingDeposit } from "@/types"
+import { createLendingActor, requireAuth } from "@/services/canisters"
+import { logError } from "@/utils/logger"
+import { Principal } from "@dfinity/principal"
+import { useICP } from "./useICP"
 
 const mockLendingAssets: LendingAsset[] = [
   {
@@ -34,68 +38,146 @@ export function useLending() {
   const [assets, setAssets] = useState<LendingAsset[]>([])
   const [deposits, setDeposits] = useState<LendingDeposit[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const { principal, isConnected } = useICP()
 
   useEffect(() => {
     loadData()
-  }, [])
+  }, [principal])
 
   async function loadData() {
     setIsLoading(true)
+    setError(null)
+    
     try {
-      // TODO: Replace with actual canister calls
-      // const canister = createActor<LendingCanister>(ICP_CONFIG.canisterIds.lending, idlFactory)
-      // const [assets, deposits] = await Promise.all([
-      //   canister.getLendingAssets(),
-      //   canister.getUserDeposits(principal),
-      // ])
-
-      // Mock data for now
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      setAssets(mockLendingAssets)
-      setDeposits(mockDeposits)
+      const canister = await createLendingActor()
+      const canisterAssets = await canister.getLendingAssets()
+      
+      // Convert canister assets to frontend format
+      const formattedAssets: LendingAsset[] = canisterAssets.map((asset) => ({
+        id: asset.id,
+        name: asset.name,
+        symbol: asset.symbol,
+        apy: asset.apy,
+        icon: asset.symbol === "BTC" 
+          ? "https://placehold.co/40x40/f7931a/ffffff?text=BTC"
+          : asset.symbol === "ETH"
+          ? "https://placehold.co/40x40/627eea/ffffff?text=ETH"
+          : "https://placehold.co/40x40/14f195/000000?text=SOL",
+      }))
+      
+      setAssets(formattedAssets.length > 0 ? formattedAssets : mockLendingAssets)
+      
+      // Load user deposits if connected
+      if (isConnected && principal) {
+        try {
+          const userDeposits = await canister.getUserDeposits(principal)
+          const formattedDeposits: LendingDeposit[] = userDeposits.map((deposit) => ({
+            asset: deposit.asset,
+            amount: Number(deposit.amount) / 1e8, // Convert from nat64
+            apy: deposit.apy,
+          }))
+          setDeposits(formattedDeposits)
+        } catch (err) {
+          // User might not have deposits yet, which is fine
+          setDeposits([])
+        }
+      } else {
+        setDeposits([])
+      }
     } catch (error) {
-      console.error("Error loading lending data:", error)
+      logError("Error loading lending data", error as Error)
+      setError("Failed to load lending data from canister")
+      // Use fallback data if canister fails
+      setAssets(mockLendingAssets)
+      setDeposits([])
     } finally {
       setIsLoading(false)
     }
   }
 
   async function deposit(asset: string, amount: number): Promise<boolean> {
-    try {
-      // TODO: Replace with actual canister call
-      // const canister = createActor<LendingCanister>(ICP_CONFIG.canisterIds.lending, idlFactory)
-      // const result = await canister.deposit(asset, amount)
-      // if (result.success) {
-      //   await loadData()
-      // }
-      // return result.success
+    if (!isConnected || !principal) {
+      logError("Deposit attempted without authentication", new Error("User not authenticated"))
+      return false
+    }
 
-      // Mock response
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      setDeposits((prev) => [...prev, { asset, amount, apy: assets.find((a) => a.symbol === asset)?.apy || 0 }])
-      return true
+    if (amount <= 0) {
+      logError("Invalid deposit amount", new Error(`Amount must be greater than 0, got ${amount}`))
+      return false
+    }
+
+    if (!["BTC", "ETH", "SOL"].includes(asset.toUpperCase())) {
+      logError("Invalid asset", new Error(`Asset must be BTC, ETH, or SOL, got ${asset}`))
+      return false
+    }
+
+    try {
+      const canister = await createLendingActor()
+      
+      // Convert amount to nat64 (multiply by 1e8 for satoshi-like precision)
+      const amountNat64 = BigInt(Math.floor(amount * 1e8))
+      
+      const result = await canister.deposit(asset.toLowerCase(), amountNat64)
+      
+      if ("ok" in result) {
+        await loadData() // Refresh data
+        return true
+      } else if ("err" in result) {
+        logError("Canister returned error", new Error(result.err), { asset, amount })
+        return false
+      }
+      
+      return false
     } catch (error) {
-      console.error("Error depositing:", error)
+      logError("Error depositing", error as Error, { asset, amount })
       return false
     }
   }
 
-  async function withdraw(asset: string, amount: number): Promise<boolean> {
-    try {
-      // TODO: Replace with actual canister call
-      // const canister = createActor<LendingCanister>(ICP_CONFIG.canisterIds.lending, idlFactory)
-      // const result = await canister.withdraw(asset, amount)
-      // if (result.success) {
-      //   await loadData()
-      // }
-      // return result.success
+  async function withdraw(asset: string, amount: number, recipientAddress?: string): Promise<boolean> {
+    if (!isConnected || !principal) {
+      logError("Withdrawal attempted without authentication", new Error("User not authenticated"))
+      return false
+    }
 
-      // Mock response
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      setDeposits((prev) => prev.filter((d) => !(d.asset === asset && d.amount === amount)))
-      return true
+    if (amount <= 0) {
+      logError("Invalid withdrawal amount", new Error(`Amount must be greater than 0, got ${amount}`))
+      return false
+    }
+
+    if (!["BTC", "ETH", "SOL"].includes(asset.toUpperCase())) {
+      logError("Invalid asset", new Error(`Asset must be BTC, ETH, or SOL, got ${asset}`))
+      return false
+    }
+
+    try {
+      const canister = await createLendingActor()
+      
+      // Convert amount to nat64
+      const amountNat64 = BigInt(Math.floor(amount * 1e8))
+      
+      // For BTC, require recipient address
+      const address = recipientAddress || (asset.toUpperCase() === "BTC" ? "" : "mock_address")
+      
+      if (asset.toUpperCase() === "BTC" && !recipientAddress) {
+        logError("Bitcoin withdrawal requires recipient address", new Error("No recipient address provided"))
+        return false
+      }
+      
+      const result = await canister.withdraw(asset.toLowerCase(), amountNat64, address)
+      
+      if ("ok" in result) {
+        await loadData() // Refresh data
+        return true
+      } else if ("err" in result) {
+        logError("Canister returned error", new Error(result.err), { asset, amount })
+        return false
+      }
+      
+      return false
     } catch (error) {
-      console.error("Error withdrawing:", error)
+      logError("Error withdrawing", error as Error, { asset, amount })
       return false
     }
   }
@@ -104,8 +186,11 @@ export function useLending() {
     assets,
     deposits,
     isLoading,
+    error,
     deposit,
     withdraw,
+    refetch: loadData,
   }
 }
+
 
