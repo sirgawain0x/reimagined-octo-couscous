@@ -1,0 +1,15 @@
+{
+  "version": "0.1.0",
+  "name": "icp-shopping-rewards",
+  "repo": "",
+  "dependencies": {
+    "base58": "dfinity/motoko-base58",
+    "base58check": "dfinity/motoko-base58check",
+    "hmac": "dfinity/motoko-hmac",
+    "ripemd160": "dfinity/motoko-ripemd160",
+    "ec": "dfinity/motoko-ec",
+    "bip32": "dfinity/motoko-bip32",
+    "bech32": "dfinity/motoko-bech32"
+  }
+}
+

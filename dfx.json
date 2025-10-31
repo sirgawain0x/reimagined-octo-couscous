@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "canisters": {
+    "shopping_rewards_frontend": {
+      "source": [
+        "dist"
+      ],
+      "type": "assets"
+    },
+    "rewards_canister": {
+      "type": "motoko",
+      "main": "src/canisters/rewards/main.mo",
+      "candid": "src/canisters/rewards/rewards.did"
+    },
+    "lending_canister": {
+      "type": "motoko",
+      "main": "src/canisters/lending/main.mo",
+      "candid": "src/canisters/lending/lending.did"
+    },
+    "portfolio_canister": {
+      "type": "motoko",
+      "main": "src/canisters/portfolio/main.mo",
+      "candid": "src/canisters/portfolio/portfolio.did"
+    },
+    "swap_canister": {
+      "type": "motoko",
+      "main": "src/canisters/swap/main.mo",
+      "candid": "src/canisters/swap/swap.did"
+    }
+  },
+  "defaults": {
+    "bitcoin": {
+      "enabled": true,
+      "nodes": ["127.0.0.1:18444"]
+    }
+  },
+  "networks": {
+    "local": {
+      "bind": "127.0.0.1:4943"
+    },
+    "ic": {
+      "providers": ["https://ic0.app"]
+    }
+  }
+}
+
