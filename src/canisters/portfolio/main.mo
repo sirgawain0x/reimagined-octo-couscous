@@ -8,6 +8,7 @@ import Principal "mo:base/Principal";
 import Result "mo:base/Result";
 import Text "mo:base/Text";
 import Types "../shared/Types";
+import RateLimiter "../shared/RateLimiter";
 
 persistent actor PortfolioCanister {
   type PortfolioAsset = Types.PortfolioAsset;
@@ -18,6 +19,9 @@ persistent actor PortfolioCanister {
   // Actor references to other canisters (set via init or setter methods)
   private var rewardsCanisterId : ?Principal = null;
   private var lendingCanisterId : ?Principal = null;
+
+  // Rate limiting (transient - resets on upgrade)
+  private transient var rateLimiter = RateLimiter.RateLimiter(RateLimiter.DEFAULT_CONFIG);
 
   // Helper functions for actor creation
   private func getRewardsCanister() : ?(actor {
@@ -56,13 +60,29 @@ persistent actor PortfolioCanister {
   ];
 
   /// Set rewards canister ID (for configuration)
-  public shared func setRewardsCanister(canisterId : Principal) : async () {
-    rewardsCanisterId := ?canisterId
+  public shared (msg) func setRewardsCanister(canisterId : Principal) : async Result<(), Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
+    rewardsCanisterId := ?canisterId;
+    #ok(())
   };
 
   /// Set lending canister ID (for configuration)
-  public shared func setLendingCanister(canisterId : Principal) : async () {
-    lendingCanisterId := ?canisterId
+  public shared (msg) func setLendingCanister(canisterId : Principal) : async Result<(), Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
+    lendingCanisterId := ?canisterId;
+    #ok(())
   };
 
   /// Get user's complete portfolio

@@ -1,15 +1,34 @@
 import { AuthClient } from "@dfinity/auth-client"
-import { HttpAgent, Actor } from "@dfinity/agent"
+import { HttpAgent, Actor, AnonymousIdentity } from "@dfinity/agent"
 import { Principal } from "@dfinity/principal"
 import { ICP_CONFIG, host, isLocalNetwork } from "@/config/env"
 import { logError, logWarn } from "@/utils/logger"
 
 let authClient: AuthClient | null = null
 let agent: HttpAgent | null = null
+let anonymousAgent: HttpAgent | null = null
 let siwbIdentity: any = null
 
 export function getAgent(): HttpAgent | null {
   return agent
+}
+
+export async function getAnonymousAgent(): Promise<HttpAgent> {
+  if (!anonymousAgent) {
+    anonymousAgent = new HttpAgent({
+      identity: new AnonymousIdentity(),
+      host,
+    })
+
+    if (isLocalNetwork) {
+      try {
+        await anonymousAgent.fetchRootKey()
+      } catch (error) {
+        logError("Error fetching root key for anonymous agent", error as Error)
+      }
+    }
+  }
+  return anonymousAgent
 }
 
 export async function createAuthClient(): Promise<AuthClient> {
@@ -213,6 +232,7 @@ export async function logout(): Promise<void> {
   }
   
   agent = null
+  // Keep anonymous agent for query calls even after logout
 }
 
 export async function getIdentity(): Promise<Principal | null> {
@@ -266,13 +286,23 @@ export async function getIdentity(): Promise<Principal | null> {
   return null
 }
 
-export function createActor<T>(canisterId: string, interfaceFactory: any): T {
-  if (!agent) {
-    throw new Error("Agent not initialized. Please login first.")
+export async function createActor<T>(canisterId: string, interfaceFactory: any, allowAnonymous = false): Promise<T> {
+  // Use authenticated agent if available
+  if (agent) {
+    return Actor.createActor<T>(interfaceFactory, {
+      agent,
+      canisterId,
+    })
   }
 
-  return Actor.createActor<T>(interfaceFactory, {
-    agent,
-    canisterId,
-  })
+  // For query methods, allow anonymous agent if explicitly allowed
+  if (allowAnonymous) {
+    const anonAgent = await getAnonymousAgent()
+    return Actor.createActor<T>(interfaceFactory, {
+      agent: anonAgent,
+      canisterId,
+    })
+  }
+
+  throw new Error("Agent not initialized. Please login first.")
 }

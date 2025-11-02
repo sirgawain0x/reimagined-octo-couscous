@@ -11,6 +11,7 @@ import Result "mo:base/Result";
 import Text "mo:base/Text";
 import Time "mo:base/Time";
 import Types "./Types";
+import RateLimiter "../shared/RateLimiter";
 
 persistent actor SwapCanister {
   type ChainKeyToken = Types.ChainKeyToken;
@@ -41,6 +42,9 @@ persistent actor SwapCanister {
   private transient var pools : HashMap.HashMap<Text, SwapPool> = HashMap.HashMap(0, Text.equal, Text.hash);
   private transient var swaps : Buffer.Buffer<SwapRecord> = Buffer.Buffer(100);
   private transient var nextSwapId : Nat64 = 1;
+
+  // Rate limiting (transient - resets on upgrade)
+  private transient var rateLimiter = RateLimiter.RateLimiter(RateLimiter.SWAP_CONFIG);
 
   /// Initialize default pools
   public shared func init() : async () {
@@ -103,6 +107,11 @@ persistent actor SwapCanister {
     minAmountOut : Nat64
   ) : async Result<SwapResult, Text> {
     let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
     let poolOpt = pools.get(poolId);
     
     switch poolOpt {
@@ -174,16 +183,29 @@ persistent actor SwapCanister {
 
   /// Check ckBTC deposit status (placeholder)
   public shared (msg) func updateBalance() : async Result<Nat, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
     // TODO: Implement actual balance update via CKBTC_MINTER
-    let _userId = msg.caller;
     #ok(0)
   };
 
   /// Retrieve ckBTC as BTC (placeholder)
-  public shared (_msg) func withdrawBTC(
-    _amount : Nat64,
-    _btcAddress : Text
+  public shared (msg) func withdrawBTC(
+    amount : Nat64,
+    btcAddress : Text
   ) : async Result<BlockIndex, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
     // TODO: Implement actual withdrawal via CKBTC_MINTER
     #ok(0)
   };

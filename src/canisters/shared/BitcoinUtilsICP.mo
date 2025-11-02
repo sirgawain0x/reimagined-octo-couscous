@@ -93,6 +93,15 @@ module BitcoinUtilsICP {
     actor "aaaaa-aa" : EcdsaCanisterActor
   };
 
+  // Get Schnorr management canister actor (aaaaa-aa)
+  // Note: Schnorr API may be available through the same management canister
+  // or through IC system API. This implementation attempts the management canister first.
+  private func getSchnorrCanister() : SchnorrCanisterActor {
+    // Try using the same management canister
+    // If Schnorr API is not available, the call will fail and can be handled by the caller
+    actor "aaaaa-aa" : SchnorrCanisterActor
+  };
+
   /// Get ECDSA public key from ICP system API
   /// This is used for P2PKH, P2SH, P2WPKH addresses
   /// Uses the ECDSA management canister (aaaaa-aa)
@@ -118,18 +127,40 @@ module BitcoinUtilsICP {
 
   /// Get Schnorr public key from ICP system API
   /// This is used for P2TR (Taproot) addresses
-  /// NOTE: Schnorr API may require different canister or IC system API access
-  /// For now, this attempts to use IC directly if available
+  /// Uses the threshold Schnorr system API through the management canister
+  /// Note: This API may not be available in all IC environments yet
+  /// When available, it will return a 32-byte x-only public key for Taproot
+  /// 
+  /// IMPORTANT: If the Schnorr API is not yet available in your IC environment,
+  /// this function will return an error. The API becomes available when IC
+  /// releases threshold Schnorr signature support.
   public func getSchnorrPublicKey(
-    _derivationPath : DerivationPath,
-    _keyName : ?Text
+    derivationPath : DerivationPath,
+    keyName : ?Text
   ) : async Result.Result<[Nat8], Text> {
-    // TODO: Implement Schnorr public key retrieval
-    // The Schnorr API might be available through IC system API
-    // or through a different canister interface
-    // For now, return error indicating it needs IC system API access
-    // which may require calling from within an actor context
-    #err("Schnorr public key API requires IC system API access. Call from actor context using IC.schnorr_public_key or implement Schnorr canister actor.")
+    let schnorrCanister = getSchnorrCanister();
+    // Default key name for Schnorr (may differ from ECDSA in some environments)
+    let key = Option.get<Text>(keyName, DEFAULT_ECDSA_KEY_NAME);
+    
+    // Call Schnorr public key API
+    // This returns an x-only public key (32 bytes) for Taproot
+    // If the API is not available, the await will fail and propagate to the caller
+    let response = await schnorrCanister.schnorr_public_key({
+      canister_id = null; // null means current canister
+      derivation_path = derivationPath;
+      key_id = {
+        name = key;
+      };
+    });
+    
+    let publicKeyBytes = Blob.toArray(response.public_key);
+    
+    // Verify we got a 32-byte x-only public key (required for Taproot)
+    if (publicKeyBytes.size() != 32) {
+      #err("Invalid Schnorr public key size. Expected 32 bytes for x-only public key, got " # Nat32.toText(Nat32.fromNat(publicKeyBytes.size())))
+    } else {
+      #ok(publicKeyBytes)
+    }
   };
 
   /// Generate P2PKH address using ECDSA public key

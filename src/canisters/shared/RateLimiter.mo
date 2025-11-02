@@ -5,9 +5,7 @@ import HashMap "mo:base/HashMap";
 import Principal "mo:base/Principal";
 import Time "mo:base/Time";
 import Nat64 "mo:base/Nat64";
-import Int64 "mo:base/Int64";
 import Array "mo:base/Array";
-import Hash "mo:base/Hash";
 
 module RateLimiter {
   // Rate limit entry tracking requests in current window
@@ -57,7 +55,9 @@ module RateLimiter {
       switch (entry) {
         case null {
           // No entry, allow request and create new entry
-          let windowNs = Int64.fromIntWrap(Nat64.toNat(config.windowMs)) * 1_000_000; // Convert ms to ns
+          // Convert milliseconds to nanoseconds (Int)
+          let windowMsNat = Nat64.toNat(config.windowMs);
+          let windowNs = windowMsNat * 1_000_000; // Convert ms to ns
           entries.put(principal, {
             count = 1;
             resetTime = now + windowNs;
@@ -67,7 +67,9 @@ module RateLimiter {
         case (?e) {
           if (now > e.resetTime) {
             // Window expired, reset
-            let windowNs = Int64.fromIntWrap(Nat64.toNat(config.windowMs)) * 1_000_000;
+            // Convert milliseconds to nanoseconds (Int)
+            let windowMsNat = Nat64.toNat(config.windowMs);
+            let windowNs = windowMsNat * 1_000_000; // Convert ms to ns
             entries.put(principal, {
               count = 1;
               resetTime = now + windowNs;

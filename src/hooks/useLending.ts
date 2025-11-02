@@ -43,14 +43,15 @@ export function useLending() {
 
   useEffect(() => {
     loadData()
-  }, [principal])
+  }, [principal, isConnected])
 
   async function loadData() {
     setIsLoading(true)
     setError(null)
     
     try {
-      const canister = await createLendingActor()
+      // getLendingAssets is a query method, so we can use anonymous agent if not authenticated
+      const canister = await createLendingActor(true)
       const canisterAssets = await canister.getLendingAssets()
       
       // Convert canister assets to frontend format
@@ -113,7 +114,8 @@ export function useLending() {
     }
 
     try {
-      const canister = await createLendingActor()
+      // deposit is an update method, requires authentication
+      const canister = await createLendingActor(false)
       
       // Convert amount to nat64 (multiply by 1e8 for satoshi-like precision)
       const amountNat64 = BigInt(Math.floor(amount * 1e8))
@@ -152,7 +154,8 @@ export function useLending() {
     }
 
     try {
-      const canister = await createLendingActor()
+      // withdraw is an update method, requires authentication
+      const canister = await createLendingActor(false)
       
       // Convert amount to nat64
       const amountNat64 = BigInt(Math.floor(amount * 1e8))

@@ -32,8 +32,9 @@ function createIdlFactory(serviceDefinition: IDL.ServiceClass): () => IDL.Servic
 
 /**
  * Create rewards canister actor
+ * Allows anonymous agent for query methods (getStores, getUserRewards)
  */
-export async function createRewardsActor(): Promise<RewardsCanister> {
+export async function createRewardsActor(allowAnonymous = true): Promise<RewardsCanister> {
   const canisterId = ICP_CONFIG.canisterIds.rewards || (ICP_CONFIG.network === "local" ? "rrkah-fqaaa-aaaaa-aaaaq-cai" : "")
   
   if (!canisterId) {
@@ -67,7 +68,7 @@ export async function createRewardsActor(): Promise<RewardsCanister> {
       getUserRewards: IDL.Func([IDL.Principal], [IDL.Nat64], ["query"]),
     })
     
-    return createActorUtil<RewardsCanister>(canisterId, idlFactory)
+    return createActorUtil<RewardsCanister>(canisterId, idlFactory, allowAnonymous)
   } catch (error) {
     logError("Failed to create rewards actor", error as Error)
     throw error
@@ -76,8 +77,9 @@ export async function createRewardsActor(): Promise<RewardsCanister> {
 
 /**
  * Create lending canister actor
+ * Allows anonymous agent for query methods (getLendingAssets, getCurrentAPY)
  */
-export async function createLendingActor(): Promise<LendingCanister> {
+export async function createLendingActor(allowAnonymous = true): Promise<LendingCanister> {
   const canisterId = ICP_CONFIG.canisterIds.lending || (ICP_CONFIG.network === "local" ? "ryjl3-tyaaa-aaaaa-aaaba-cai" : "")
   
   if (!canisterId) {
@@ -123,7 +125,7 @@ export async function createLendingActor(): Promise<LendingCanister> {
       getCurrentAPY: IDL.Func([IDL.Text], [IDL.Float64], ["query"]),
     })
     
-    return createActorUtil<LendingCanister>(canisterId, idlFactory)
+    return createActorUtil<LendingCanister>(canisterId, idlFactory, allowAnonymous)
   } catch (error) {
     logError("Failed to create lending actor", error as Error)
     throw error
@@ -168,8 +170,9 @@ export async function createPortfolioActor(): Promise<PortfolioCanister> {
 
 /**
  * Create swap canister actor
+ * Allows anonymous agent for query methods (getQuote, getPools)
  */
-export async function createSwapActor(): Promise<SwapCanister> {
+export async function createSwapActor(allowAnonymous = true): Promise<SwapCanister> {
   const canisterId = ICP_CONFIG.canisterIds.swap || (ICP_CONFIG.network === "local" ? "rrkah-fqaaa-aaaaa-aaaaq-cai" : "")
   
   if (!canisterId) {
@@ -236,7 +239,7 @@ export async function createSwapActor(): Promise<SwapCanister> {
       }))], ["query"]),
     })
     
-    return createActorUtil<SwapCanister>(canisterId, idlFactory)
+    return createActorUtil<SwapCanister>(canisterId, idlFactory, allowAnonymous)
   } catch (error) {
     logError("Failed to create swap actor", error as Error)
     throw error

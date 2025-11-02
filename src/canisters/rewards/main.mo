@@ -15,6 +15,7 @@ import Result "mo:base/Result";
 import Time "mo:base/Time";
 import Types "./Types";
 import BitcoinUtilsICP "../shared/BitcoinUtilsICP";
+import RateLimiter "../shared/RateLimiter";
 
 // Helper functions for equality and hashing (must be defined before use)
 func storeIdEqual(a : Types.StoreId, b : Types.StoreId) : Bool { a == b };
@@ -49,6 +50,9 @@ persistent actor RewardsCanister {
   // Bitcoin API integration placeholder
   private transient let BTC_API_ENABLED : Bool = false;
 
+  // Rate limiting (transient - resets on upgrade)
+  private transient var rateLimiter = RateLimiter.RateLimiter(RateLimiter.REWARDS_CONFIG);
+
   /// Get all available stores
   public query func getStores() : async [Store] {
     Iter.toArray(stores.vals())
@@ -56,7 +60,14 @@ persistent actor RewardsCanister {
 
   /// Add a new store
   public shared (msg) func addStore(request : AddStoreRequest) : async Result<StoreId, Text> {
-    if (not isAdmin(msg.caller)) {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
+    if (not isAdmin(userId)) {
       return #err("Unauthorized: Only admins can add stores")
     };
 
@@ -81,6 +92,11 @@ persistent actor RewardsCanister {
     amount : Nat64
   ) : async Result<PurchaseReceipt, Text> {
     let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
 
     // Verify store exists
     let storeOpt = stores.get(storeId);
@@ -143,6 +159,11 @@ persistent actor RewardsCanister {
   /// Claim rewards (Bitcoin transaction implementation pending)
   public shared (msg) func claimRewards() : async Result<BitcoinTx, Text> {
     let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
     let rewards = Option.get<Nat64>(userRewards.get(userId), 0);
 
     if (rewards == 0) {
@@ -210,7 +231,14 @@ persistent actor RewardsCanister {
 
   /// Add an admin (only existing admins can add new admins)
   public shared (msg) func addAdmin(newAdmin : Principal) : async Result<(), Text> {
-    if (not isAdmin(msg.caller)) {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
+    if (not isAdmin(userId)) {
       return #err("Unauthorized: Only admins can add other admins")
     };
     admins.put(newAdmin, true);
@@ -219,10 +247,17 @@ persistent actor RewardsCanister {
 
   /// Remove an admin (only admins can remove other admins)
   public shared (msg) func removeAdmin(adminToRemove : Principal) : async Result<(), Text> {
-    if (not isAdmin(msg.caller)) {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
+    if (not isAdmin(userId)) {
       return #err("Unauthorized: Only admins can remove other admins")
     };
-    if (Principal.equal(msg.caller, adminToRemove)) {
+    if (Principal.equal(userId, adminToRemove)) {
       return #err("Cannot remove yourself as admin")
     };
     admins.delete(adminToRemove);

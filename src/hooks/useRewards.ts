@@ -17,18 +17,23 @@ export function useRewards() {
   const [stores, setStores] = useState<Store[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const { principal, isConnected } = useICP()
+  const { principal, isConnected, isLoading: isAuthLoading } = useICP()
 
   useEffect(() => {
-    loadStores()
-  }, [])
+    // Wait for auth check to complete before loading stores
+    // This prevents errors when trying to create actors before agent is initialized
+    if (!isAuthLoading) {
+      loadStores()
+    }
+  }, [isAuthLoading])
 
   async function loadStores() {
     setIsLoading(true)
     setError(null)
     
     try {
-      const canister = await createRewardsActor()
+      // getStores is a query method, so we can use anonymous agent if not authenticated
+      const canister = await createRewardsActor(true)
       const canisterStores = await canister.getStores()
       
       // Convert canister store format to frontend format
@@ -65,7 +70,8 @@ export function useRewards() {
     }
 
     try {
-      const canister = await createRewardsActor()
+      // trackPurchase is an update method, requires authentication
+      const canister = await createRewardsActor(false)
       
       // Convert amount to nat64 (satoshi-like precision: multiply by 1e8)
       const amountNat64 = BigInt(Math.floor(amount * 1e8))

@@ -30,14 +30,15 @@ export function useSwap() {
 
   useEffect(() => {
     loadPools()
-  }, [])
+  }, [isConnected])
 
   async function loadPools() {
     setIsLoading(true)
     setError(null)
     
     try {
-      const canister = await createSwapActor()
+      // getPools is a query method, so we can use anonymous agent if not authenticated
+      const canister = await createSwapActor(true)
       const canisterPools = await canister.getPools()
       
       // Convert canister pools to frontend format
@@ -72,7 +73,8 @@ export function useSwap() {
     }
 
     try {
-      const canister = await createSwapActor()
+      // getQuote is a query method, so we can use anonymous agent if not authenticated
+      const canister = await createSwapActor(true)
       const result = await canister.getQuote(poolId, amountIn)
       
       if ("ok" in result) {
@@ -112,7 +114,8 @@ export function useSwap() {
     }
 
     try {
-      const canister = await createSwapActor()
+      // swap is an update method, requires authentication
+      const canister = await createSwapActor(false)
       
       // Convert ChainKeyToken string to variant
       let tokenInVariant: any
@@ -147,7 +150,8 @@ export function useSwap() {
     }
 
     try {
-      const canister = await createSwapActor()
+      // getSwapHistory is a query method, but requires principal so use authenticated agent
+      const canister = await createSwapActor(false)
       const history = await canister.getSwapHistory(principal)
       
       return history.map((swap) => {
