@@ -26,6 +26,53 @@ persistent actor SwapCanister {
   // ckBTC Minter: mqygn-kiaaa-aaaah-aaaqaa-cai
   // For now, we'll use placeholder principals
   
+  // ICRC Standard Types (needed for CKBTC ledger interface)
+  private type TransferArgs = {
+    from : { owner : Principal; subaccount : ?Blob };
+    to : { owner : Principal; subaccount : ?Blob };
+    amount : Nat;
+    fee : ?Nat;
+    memo : ?Blob;
+    created_at_time : ?Nat64;
+  };
+
+  private type TransferError = {
+    #GenericError : { message : Text; error_code : Nat };
+    #TemporarilyUnavailable;
+    #InsufficientFunds : { balance : Nat };
+    #BadBurn : { min_burn_amount : Nat };
+    #Duplicate : { duplicate_of : Nat };
+    #BadFee : { expected_fee : Nat };
+  };
+
+  private type Account = {
+    owner : Principal;
+    subaccount : ?Blob;
+  };
+
+  private type TxIndex = Nat;
+  private type BlockIndex = Nat;
+
+  private type MintTx = {
+    amount : Nat;
+    block_index : BlockIndex;
+  };
+
+  private type MinterError = {
+    #GenericError : { error_message : Text; error_code : Nat };
+    #TemporarilyUnavailable : { error_message : Text; error_code : Nat };
+    #MalformedAddress;
+    #InsufficientFunds : { balance : Nat };
+    #AmountTooLow : { min_withdrawal_amount : Nat };
+    #AlreadyProcessing;
+  };
+
+  private type RetrieveBtcRequest = {
+    address : Text;
+    amount : Nat;
+    created_at : ?Nat64;
+  };
+
   private transient let _CKBTC_LEDGER : actor {
     icrc1_transfer : (TransferArgs) -> async Result<TxIndex, TransferError>;
     icrc1_balance_of : (Account) -> async Nat;
@@ -196,8 +243,8 @@ persistent actor SwapCanister {
 
   /// Retrieve ckBTC as BTC (placeholder)
   public shared (msg) func withdrawBTC(
-    amount : Nat64,
-    btcAddress : Text
+    _amount : Nat64,
+    _btcAddress : Text
   ) : async Result<BlockIndex, Text> {
     let userId = msg.caller;
 
@@ -253,52 +300,5 @@ persistent actor SwapCanister {
       case _ pool.tokenA;
     }
   };
-};
-
-// ICRC Standard Types
-type TransferArgs = {
-  from : { owner : Principal; subaccount : ?Blob };
-  to : { owner : Principal; subaccount : ?Blob };
-  amount : Nat;
-  fee : ?Nat;
-  memo : ?Blob;
-  created_at_time : ?Nat64;
-};
-
-type TransferError = {
-  #GenericError : { message : Text; error_code : Nat };
-  #TemporarilyUnavailable;
-  #InsufficientFunds : { balance : Nat };
-  #BadBurn : { min_burn_amount : Nat };
-  #Duplicate : { duplicate_of : Nat };
-  #BadFee : { expected_fee : Nat };
-};
-
-type Account = {
-  owner : Principal;
-  subaccount : ?Blob;
-};
-
-type TxIndex = Nat;
-type BlockIndex = Nat;
-
-type MintTx = {
-  amount : Nat;
-  block_index : BlockIndex;
-};
-
-type MinterError = {
-  #GenericError : { error_message : Text; error_code : Nat };
-  #TemporarilyUnavailable : { error_message : Text; error_code : Nat };
-  #MalformedAddress;
-  #InsufficientFunds : { balance : Nat };
-  #AmountTooLow : { min_withdrawal_amount : Nat };
-  #AlreadyProcessing;
-};
-
-type RetrieveBtcRequest = {
-  address : Text;
-  amount : Nat;
-  created_at : ?Nat64;
 };
 

@@ -35,14 +35,21 @@ function createIdlFactory(serviceDefinition: IDL.ServiceClass): () => IDL.Servic
  * Allows anonymous agent for query methods (getStores, getUserRewards)
  */
 export async function createRewardsActor(allowAnonymous = true): Promise<RewardsCanister> {
-  const canisterId = ICP_CONFIG.canisterIds.rewards || (ICP_CONFIG.network === "local" ? "rrkah-fqaaa-aaaaa-aaaaq-cai" : "")
+  let canisterId = ICP_CONFIG.canisterIds.rewards
   
-  if (!canisterId) {
-    throw new Error("Rewards canister ID not configured. Set VITE_CANISTER_ID_REWARDS or deploy the canister first.")
+  // For local network, try to get the canister ID from dfx if not configured
+  if (!canisterId && ICP_CONFIG.network === "local") {
+    // Don't use a default - let it fail gracefully with a clear error
+    // Users should deploy the canister and get the ID
   }
   
-  if (ICP_CONFIG.network === "local" && !ICP_CONFIG.canisterIds.rewards) {
-    logWarn("Using default rewards canister ID. Set VITE_CANISTER_ID_REWARDS for production.")
+  if (!canisterId) {
+    throw new Error("Rewards canister ID not configured. Please deploy the rewards_canister with 'dfx deploy rewards_canister' and set VITE_CANISTER_ID_REWARDS in your .env file.")
+  }
+  
+  // Validate canister ID format (should not be placeholder)
+  if (canisterId.includes("777") || canisterId.includes("lp777")) {
+    throw new Error(`Invalid canister ID: ${canisterId}. This appears to be a placeholder. Please deploy the canister and use the actual canister ID.`)
   }
   
   try {

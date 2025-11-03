@@ -46,11 +46,22 @@ export function useRewards() {
       }))
       
       setStores(formattedStores.length > 0 ? formattedStores : fallbackStores)
-    } catch (error) {
-      logError("Error loading stores", error as Error, { useFallback: true })
-      // Use fallback stores if canister call fails
+    } catch (error: any) {
+      // Check if error is due to invalid/placeholder canister ID
+      const errorMessage = error?.message || String(error)
+      if (errorMessage.includes("Invalid canister ID") || errorMessage.includes("placeholder") || errorMessage.includes("not found")) {
+        // Silently use fallback - this is expected when canisters aren't deployed
+        // Only log if debugging is needed
+        if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_CANISTERS === "true") {
+          logWarn("Canister not deployed. Using fallback stores.", { error: errorMessage })
+        }
+        setError(null) // Clear error - fallback is intentional
+      } else {
+        logError("Error loading stores", error as Error, { useFallback: true })
+        setError("Failed to load stores from canister. Using default data.")
+      }
+      // Always use fallback stores if canister call fails
       setStores(fallbackStores)
-      setError("Failed to load stores from canister. Using default data.")
     } finally {
       setIsLoading(false)
     }

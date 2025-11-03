@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Bitcoin, Loader2 } from "lucide-react"
 import {
   Dialog,
@@ -20,9 +20,18 @@ interface ConnectDialogProps {
 
 function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps) {
   const [loading, setLoading] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Clear error when dialog opens
+  useEffect(() => {
+    if (isOpen) {
+      setError(null)
+    }
+  }, [isOpen])
 
   async function handleWalletSelect(provider: string) {
     setLoading(provider)
+    setError(null)
     try {
       logInfo(`Connecting to ${provider} wallet`)
       
@@ -40,14 +49,23 @@ function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps) {
       }
     } catch (error) {
       logError(`Error connecting to ${provider}`, error as Error)
-      alert(`Failed to connect to ${provider} wallet. Please make sure the wallet extension is installed and unlocked.`)
+      // Show the actual error message from the wallet connection
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : `Failed to connect to ${provider} wallet. Please make sure the wallet extension is installed and unlocked.`
+      setError(errorMessage)
     } finally {
       setLoading(null)
     }
   }
 
+  function handleClose() {
+    setError(null)
+    onClose()
+  }
+
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Connect Bitcoin Wallet</DialogTitle>
@@ -55,6 +73,12 @@ function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps) {
             Select your Bitcoin wallet to sign in:
           </DialogDescription>
         </DialogHeader>
+        
+        {error && (
+          <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
+            {error}
+          </div>
+        )}
         
         <div className="space-y-3 py-4">
           <Button
