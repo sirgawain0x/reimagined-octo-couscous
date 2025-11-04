@@ -1,4 +1,5 @@
 import Array "mo:base/Array";
+import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
 import Float "mo:base/Float";
 import HashMap "mo:base/HashMap";
@@ -12,6 +13,8 @@ import Text "mo:base/Text";
 import Time "mo:base/Time";
 import Types "./Types";
 import RateLimiter "../shared/RateLimiter";
+import SolRpcClient "../shared/SolRpcClient";
+import SolanaUtils "../shared/SolanaUtils";
 
 persistent actor SwapCanister {
   type ChainKeyToken = Types.ChainKeyToken;
@@ -93,6 +96,9 @@ persistent actor SwapCanister {
   // Rate limiting (transient - resets on upgrade)
   private transient var rateLimiter = RateLimiter.RateLimiter(RateLimiter.SWAP_CONFIG);
 
+  // SOL RPC Client
+  private let solRpcClient = SolRpcClient.createClient();
+
   /// Initialize default pools
   public shared func init() : async () {
     // ckBTC/ICP pool
@@ -111,6 +117,15 @@ persistent actor SwapCanister {
       reserveA = 300_000_000_000_000_000; // 0.3 ETH (18 decimals)
       reserveB = 9_000_000_000_000; // 9 ICP (8 decimals)
       kLast = 2_700_000_000_000_000_000_000;
+    });
+
+    // SOL/ICP pool (real Solana via SOL RPC canister)
+    pools.put("SOL_ICP", {
+      tokenA = #SOL;
+      tokenB = #ICP;
+      reserveA = 500_000_000_000; // 500 SOL (9 decimals, lamports)
+      reserveB = 12_000_000_000_000; // 12 ICP (8 decimals)
+      kLast = 6_000_000_000_000_000_000_000;
     });
   };
 
@@ -275,17 +290,259 @@ persistent actor SwapCanister {
     pools.get(poolId)
   };
 
+  /// Get SOL balance for a Solana address
+  public shared (msg) func getSOLBalance(solAddress : Text) : async Result<Nat64, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
+    let rpcSources = #Default(#Mainnet);
+    let rpcConfig : ?SolRpcClient.RpcConfig = ?{
+      responseConsensus = ?#Equality;
+      maxRetries = ?(3 : Nat);
+      timeoutSeconds = ?(30 : Nat);
+    };
+    let params = ?{
+      commitment = ?#finalized;
+      minContextSlot = null;
+    };
+
+    switch (await solRpcClient.getBalance(rpcSources, rpcConfig, solAddress, params)) {
+      case (#ok(result)) #ok(result.value);
+      case (#err(e)) #err("Failed to get SOL balance: " # e);
+    }
+  };
+
+  /// Get SOL account info
+  public shared (_msg) func getSOLAccountInfo(solAddress : Text) : async Result.Result<?SolRpcClient.AccountInfo, Text> {
+    let rpcSources = #Default(#Mainnet);
+    let rpcConfig : ?SolRpcClient.RpcConfig = ?{
+      responseConsensus = ?#Equality;
+      maxRetries = ?(3 : Nat);
+      timeoutSeconds = ?(30 : Nat);
+    };
+    let params = ?{
+      commitment = ?#finalized;
+      encoding = ?"base64";
+      dataSlice = null;
+      minContextSlot = null;
+    };
+
+    switch (await solRpcClient.getAccountInfo(rpcSources, rpcConfig, solAddress, params)) {
+      case (#ok(result)) #ok(result.value);
+      case (#err(e)) #err("Failed to get SOL account info: " # e);
+    }
+  };
+
+  /// Get recent blockhash using getSlot and getBlock
+  public shared (_msg) func getRecentBlockhash() : async Result.Result<Text, Text> {
+    let rpcSources = #Default(#Mainnet);
+    let rpcConfig : ?SolRpcClient.RpcConfig = ?{
+      responseConsensus = ?#Equality;
+      maxRetries = ?(3 : Nat);
+      timeoutSeconds = ?(30 : Nat);
+    };
+
+    // Get slot first
+    let slotParams = ?{
+      commitment = ?#finalized;
+      minContextSlot = null;
+    };
+
+    let slotResult = switch (await solRpcClient.getSlot(rpcSources, rpcConfig, slotParams)) {
+      case (#ok(result)) #ok(result.slot);
+      case (#err(e)) #err("Failed to get slot: " # e);
+    };
+
+    let slot = switch (slotResult) {
+      case (#ok(s)) s;
+      case (#err(e)) return #err(e);
+    };
+
+    // Get block to extract blockhash
+    let blockParams = ?{
+      slot = ?slot;
+      commitment = ?#finalized;
+      encoding = ?"base58";
+      transactionDetails = ?"none";
+      maxSupportedTransactionVersion = null;
+      rewards = ?false;
+    };
+
+    switch (await solRpcClient.getBlock(rpcSources, rpcConfig, blockParams)) {
+      case (#ok(block)) {
+        switch (block.blockhash) {
+          case (?bh) #ok(bh);
+          case (null) #err("Blockhash not found in block response");
+        }
+      };
+      case (#err(e)) #err("Failed to get block: " # e);
+    }
+  };
+
+  /// Get current Solana slot
+  public shared (_msg) func getSolanaSlot() : async Result.Result<Nat64, Text> {
+    let rpcSources = #Default(#Mainnet);
+    let rpcConfig : ?SolRpcClient.RpcConfig = ?{
+      responseConsensus = ?#Equality;
+      maxRetries = ?(3 : Nat);
+      timeoutSeconds = ?(30 : Nat);
+    };
+    let params = ?{
+      commitment = ?#finalized;
+      minContextSlot = null;
+    };
+
+    switch (await solRpcClient.getSlot(rpcSources, rpcConfig, params)) {
+      case (#ok(result)) #ok(result.slot);
+      case (#err(e)) #err("Failed to get Solana slot: " # e);
+    }
+  };
+
+  /// Get Solana address for a user (derived from Ed25519 public key)
+  public shared (msg) func getSolanaAddress(keyName : ?Text) : async Result.Result<Text, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
+    // Derive path from user principal
+    let principalBlob = Principal.toBlob(userId);
+    let principalBytes = Blob.toArray(principalBlob);
+    let derivationPath = [
+      Blob.fromArray(principalBytes)
+    ];
+
+    switch (await SolanaUtils.getEd25519PublicKey(derivationPath, keyName)) {
+      case (#ok(publicKey)) {
+        // Derive Solana address from public key
+        let address = SolanaUtils.deriveSolanaAddress(publicKey);
+        #ok(address)
+      };
+      case (#err(e)) #err("Failed to get Solana address: " # e);
+    }
+  };
+
+  /// Send SOL to a Solana address
+  /// This builds, signs, and sends a Solana transfer transaction
+  public shared (msg) func sendSOL(
+    toAddress : Text,
+    amountLamports : Nat64,
+    keyName : ?Text
+  ) : async Result.Result<Text, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
+    // 1. Get Solana address for sender
+    let principalBlob = Principal.toBlob(userId);
+    let principalBytes = Blob.toArray(principalBlob);
+    let derivationPath = [
+      Blob.fromArray(principalBytes)
+    ];
+
+    let fromAddressResult = switch (await SolanaUtils.getEd25519PublicKey(derivationPath, keyName)) {
+      case (#ok(publicKey)) {
+        let address = SolanaUtils.deriveSolanaAddress(publicKey);
+        #ok(address)
+      };
+      case (#err(e)) #err("Failed to get sender address: " # e);
+    };
+
+    let fromAddress = switch (fromAddressResult) {
+      case (#ok(addr)) addr;
+      case (#err(e)) return #err(e);
+    };
+
+    // 2. Get recent blockhash (using getSlot then getBlock)
+    let rpcSources = #Default(#Mainnet);
+    let rpcConfig : ?SolRpcClient.RpcConfig = ?{
+      responseConsensus = ?#Equality;
+      maxRetries = ?(3 : Nat);
+      timeoutSeconds = ?(30 : Nat);
+    };
+
+    // Get slot first
+    let slotParams = ?{
+      commitment = ?#finalized;
+      minContextSlot = null;
+    };
+
+    let slotResult = switch (await solRpcClient.getSlot(rpcSources, rpcConfig, slotParams)) {
+      case (#ok(result)) #ok(result.slot);
+      case (#err(e)) #err("Failed to get slot: " # e);
+    };
+
+    let slot = switch (slotResult) {
+      case (#ok(s)) s;
+      case (#err(e)) return #err(e);
+    };
+
+    // 3. Get block to get blockhash (using getBlock with slot)
+    let blockParams = ?{
+      slot = ?slot;
+      commitment = ?#finalized;
+      encoding = ?"base58";
+      transactionDetails = ?"none";
+      maxSupportedTransactionVersion = null;
+      rewards = ?false;
+    };
+
+    let blockResult = switch (await solRpcClient.getBlock(rpcSources, rpcConfig, blockParams)) {
+      case (#ok(block)) {
+        switch (block.blockhash) {
+          case (?bh) #ok(bh);
+          case (null) #err("Blockhash not found in block response");
+        }
+      };
+      case (#err(e)) #err("Failed to get block: " # e);
+    };
+
+    let recentBlockhash = switch (blockResult) {
+      case (#ok(bh)) bh;
+      case (#err(e)) return #err(e);
+    };
+
+    // 4. Build transaction using jsonRequest (more flexible than wire format)
+    // Create a transfer instruction using System Program
+    let transferInstruction = SolanaUtils.createTransferInstruction(fromAddress, toAddress, amountLamports);
+    
+    // Build transaction JSON-RPC request
+    // Note: For full production, we'd build the transaction properly and sign it
+    // For now, we'll use jsonRequest which allows us to send any Solana RPC method
+    // This requires the transaction to be built and signed externally or via a more complete library
+    
+    // 5. For now, return an error indicating that full transaction building is needed
+    // In production, you would:
+    // - Build the transaction message
+    // - Sign it with Ed25519
+    // - Serialize to base64
+    // - Send via sendTransaction
+    
+    #err("Full transaction building and signing not yet implemented. Use a Solana library for transaction serialization.")
+  };
+
   // Helper functions
   private func tokensMatch(pool : SwapPool, token : ChainKeyToken) : Bool {
     let matchesTokenA = switch (pool.tokenA, token) {
       case (#ckBTC, #ckBTC) true;
       case (#ckETH, #ckETH) true;
+      case (#SOL, #SOL) true;
       case (#ICP, #ICP) true;
       case _ false;
     };
     let matchesTokenB = switch (pool.tokenB, token) {
       case (#ckBTC, #ckBTC) true;
       case (#ckETH, #ckETH) true;
+      case (#SOL, #SOL) true;
       case (#ICP, #ICP) true;
       case _ false;
     };
@@ -296,6 +553,7 @@ persistent actor SwapCanister {
     switch (pool.tokenA, token) {
       case (#ckBTC, #ckBTC) pool.tokenB;
       case (#ckETH, #ckETH) pool.tokenB;
+      case (#SOL, #SOL) pool.tokenB;
       case (#ICP, #ICP) pool.tokenB;
       case _ pool.tokenA;
     }

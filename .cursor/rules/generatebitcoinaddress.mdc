@@ -1,0 +1,75 @@
+---
+description: Bitcoin doesn't use accounts; instead, it uses a UTXO model. A UTXO is an unspent transaction output.
+alwaysApply: false
+---
+Generating a Bitcoin address
+Bitcoin
+Bitcoin doesn't use accounts; instead, it uses a UTXO model. A UTXO is an unspent transaction output.
+
+Each UTXO is associated with a Bitcoin address that is derived from either a public key or a script that defines the conditions under which the UTXO can be spent. A Bitcoin address is often used as a single-use invoice instead of a persistent address to increase privacy.
+
+Bitcoin legacy addresses
+Legacy addresses start with a 1 and are called P2PKH (Pay to public key hash) addresses. They encode the hash of an ECDSA public key.
+
+There is also another type of legacy address that starts with a 3 called P2SH (Pay to script hash) that encodes the hash of a script. The script can define complex conditions such as multisig or timelocks.
+
+Bitcoin SegWit addresses
+SegWit addresses follow the Bech32 format and start with bc1. They are cheaper to spend than legacy addresses and solve problems regarding transaction malleability, which is important for advanced use cases like partially signed Bitcoin transactions (PSBT) or the Lightning Network.
+
+SegWit addresses can be of three types:
+
+P2WPKH (Pay to witness public key hash): A SegWit address that encodes the hash of an ECDSA public key.
+P2WSH (Pay to witness script hash): A SegWit address that encodes the hash of a script.
+P2TR (Pay to taproot): A SegWit address that can be unlocked by a Schnorr signature or a script.
+Generating addresses with threshold ECDSA
+To generate a Bitcoin address that can only be spent by a specific smart contract or a specific caller of a smart contract, you need to derive the address from the smart contract's public key.
+
+An ECDSA public key can be retrieved using the ecdsa_public_key system API endpoint. The basic Bitcoin example demonstrates how to generate a P2PKH address from a smart contract's public key.
+
+Motoko
+Rust
+
+motoko/basic_bitcoin/src/basic_bitcoin/src/Main.mo
+/// Returns the P2PKH address of this canister at a specific derivation path.
+public func get_p2pkh_address() : async BitcoinAddress {
+  await P2pkh.get_address(ecdsa_canister_actor, NETWORK, KEY_NAME, p2pkhDerivationPath());
+};
+
+See full example on GitHub
+Generating addresses with threshold Schnorr
+A Schnorr public key can be retrieved using the schnorr_public_key system API endpoint. The basic Bitcoin example demonstrates how to generate two different types of P2TR addresses from a smart contract's public key: a key-only address and an address using a key or script.
+
+Generating a key-only P2TR address
+Motoko
+Rust
+
+motoko/basic_bitcoin/src/basic_bitcoin/src/Main.mo
+public func get_p2tr_key_only_address() : async BitcoinAddress {
+  await P2trKeyOnly.get_address_key_only(schnorr_canister_actor, NETWORK, KEY_NAME, p2trKeyOnlyDerivationPath());
+};
+
+See full example on GitHub
+Generating a key or script P2TR address
+Motoko
+Rust
+
+motoko/basic_bitcoin/src/basic_bitcoin/src/Main.mo
+public func get_p2tr_address() : async BitcoinAddress {
+  await P2tr.get_address(schnorr_canister_actor, NETWORK, KEY_NAME, p2trDerivationPaths());
+};
+
+See full example on GitHub
+Resources
+Learn more about Bitcoin addresses using ECDSA.
+
+Learn more about Bitcoin addresses using Schnorr:
+
+Taproot signatures BIP340.
+
+Taproot addresses BIP341.
+
+Taproot scripts BIP342.
+
+Learn more about the ecdsa_public_key API.
+
+Learn more about the schnorr_public_key API.

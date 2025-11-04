@@ -4,6 +4,8 @@ import { createRewardsActor, requireAuth } from "@/services/canisters"
 import { logError, logWarn } from "@/utils/logger"
 import { Principal } from "@dfinity/principal"
 import { useICP } from "./useICP"
+import { retry, retryWithTimeout } from "@/utils/retry"
+import { checkRateLimit } from "@/utils/rateLimiter"
 
 // Fallback stores if canister is not available
 const fallbackStores: Store[] = [
@@ -33,8 +35,17 @@ export function useRewards() {
     
     try {
       // getStores is a query method, so we can use anonymous agent if not authenticated
-      const canister = await createRewardsActor(true)
-      const canisterStores = await canister.getStores()
+      // Use retry with timeout for query operations (shorter timeout for queries)
+      const canister = await retry(
+        () => createRewardsActor(true),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      const canisterStores = await retryWithTimeout(
+        () => canister.getStores(),
+        10000, // 10 second timeout for query
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
       
       // Convert canister store format to frontend format
       const formattedStores: Store[] = canisterStores.map((store) => ({
@@ -47,16 +58,36 @@ export function useRewards() {
       
       setStores(formattedStores.length > 0 ? formattedStores : fallbackStores)
     } catch (error: any) {
-      // Check if error is due to invalid/placeholder canister ID
       const errorMessage = error?.message || String(error)
-      if (errorMessage.includes("Invalid canister ID") || errorMessage.includes("placeholder") || errorMessage.includes("not found")) {
-        // Silently use fallback - this is expected when canisters aren't deployed
-        // Only log if debugging is needed
+      const errorName = error?.name || ""
+      const errorBody = error?.body || String(error)
+      
+      // Check if error is due to certificate verification (canister doesn't exist)
+      if (errorName === "ProtocolError" || 
+          errorMessage.includes("certificate verification") || 
+          errorMessage.includes("Invalid delegation") ||
+          errorMessage.includes("canister signature") ||
+          errorBody.includes("certificate verification") ||
+          errorBody.includes("Invalid delegation")) {
+        // Canister doesn't exist - silently use fallback
+        if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_CANISTERS === "true") {
+          logWarn("Rewards canister not deployed. Using fallback stores.", { error: errorMessage })
+        }
+        setError(null) // Clear error - fallback is intentional
+      } else if (errorName === "TrustError" || errorMessage.includes("node signatures") || errorMessage.includes("TrustError")) {
+        // Network mismatch
+        if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_CANISTERS === "true") {
+          logWarn("Network mismatch. Using fallback stores.", { error: errorMessage })
+        }
+        setError(null)
+      } else if (errorMessage.includes("Invalid canister ID") || errorMessage.includes("placeholder") || errorMessage.includes("not found") || errorMessage.includes("canister_not_found")) {
+        // Invalid canister ID
         if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_CANISTERS === "true") {
           logWarn("Canister not deployed. Using fallback stores.", { error: errorMessage })
         }
         setError(null) // Clear error - fallback is intentional
       } else {
+        // Other errors - log but still use fallback
         logError("Error loading stores", error as Error, { useFallback: true })
         setError("Failed to load stores from canister. Using default data.")
       }
@@ -81,13 +112,24 @@ export function useRewards() {
     }
 
     try {
+      // Frontend rate limiting (optional but recommended)
+      checkRateLimit("rewards", principal.toText())
+      
       // trackPurchase is an update method, requires authentication
-      const canister = await createRewardsActor(false)
+      // Use retry with longer timeout for update operations
+      const canister = await retry(
+        () => createRewardsActor(false),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
       
       // Convert amount to nat64 (satoshi-like precision: multiply by 1e8)
       const amountNat64 = BigInt(Math.floor(amount * 1e8))
       
-      const result = await canister.trackPurchase(storeId, amountNat64)
+      const result = await retryWithTimeout(
+        () => canister.trackPurchase(storeId, amountNat64),
+        30000, // 30 second timeout for update operations
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
       
       // Handle Result variant from canister
       if ("ok" in result) {

@@ -50,7 +50,8 @@
 - [x] Implement admin authentication checks in rewards canister
 - [x] Implement admin authentication checks in lending canister
 - [ ] Add input validation for all user inputs (partially complete - hooks have validation, canisters need more)
-- [ ] Implement rate limiting on canister methods
+- [x] Implement frontend rate limiting (integrated into all hooks - lending: 20/min, swap: 30/min, rewards: 50/min)
+- [ ] Implement rate limiting on canister methods (canister-level rate limiting still needed)
 - [x] Add proper authentication checks on all user-facing operations
 - [ ] Audit all cross-canister calls for security vulnerabilities
 - [x] Implement proper error messages (don't leak sensitive info)
@@ -59,8 +60,8 @@
 - [x] Add React Error Boundaries (`error.tsx`, `global-error.tsx`)
 - [x] Implement comprehensive error handling in all hooks
 - [x] Add user-friendly error messages
-- [ ] Implement retry logic for failed canister calls
-- [ ] Add timeout handling for long-running operations
+- [x] Implement retry logic for failed canister calls (integrated into all hooks with exponential backoff)
+- [x] Add timeout handling for long-running operations (query: 10s, update: 30s, withdrawal: 60s)
 - [x] Log errors to monitoring service (not console) - logger implemented, ready for Sentry integration
 
 ### 5. Configuration & Environment
@@ -147,12 +148,12 @@
 **Production Readiness: ⚠️ NOT READY - Significant Progress Made**
 
 **Completion Estimate:**
-- Critical Issues: ~65% complete (up from 20%)
-- Overall: ~55% complete (up from 40%)
+- Critical Issues: ~70% complete (up from 65%)
+- Overall: ~60% complete (up from 55%)
 
 **Estimated Time to Production:**
-- With focused effort: 1-2 weeks (reduced from 2-4 weeks)
-- With part-time effort: 3-4 weeks (reduced from 6-8 weeks)
+- With focused effort: 1-2 weeks (same)
+- With part-time effort: 3-4 weeks (same)
 
 **Completed Items:**
 ✅ Frontend-backend integration (all hooks connected to canisters)
@@ -163,14 +164,16 @@
 ✅ .env.example file created
 ✅ Comprehensive error handling in all hooks
 ✅ Loading states for all async operations
+✅ Retry logic with exponential backoff (integrated into all hooks)
+✅ Timeout handling for canister calls (query: 10s, update: 30s, withdrawal: 60s)
+✅ Frontend rate limiting (integrated into update operations)
 
 **Remaining Blockers:**
 1. ⚠️ Bitcoin integration incomplete (address generation, transactions, UTXO management)
 2. ⚠️ No test coverage (unit, integration, E2E tests)
 3. ⚠️ Input validation incomplete (canister-level validation needed)
-4. ⚠️ Retry logic and timeout handling for canister calls
-5. ⚠️ Rate limiting on canister methods
-6. ⚠️ ckBTC integration incomplete (swap canister)
+4. ⚠️ Canister-level rate limiting (frontend rate limiting completed)
+5. ⚠️ ckBTC integration incomplete (swap canister)
 
 **Recommendation:**
 Significant progress has been made on critical items. The application is now ~65% ready for production. Remaining work focuses on:

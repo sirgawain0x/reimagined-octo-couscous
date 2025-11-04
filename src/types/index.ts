@@ -36,7 +36,7 @@ export interface LendingDeposit {
 
 export type View = "shop" | "lend" | "portfolio" | "swap"
 
-export type ChainKeyToken = "ckBTC" | "ckETH" | "ICP"
+export type ChainKeyToken = "ckBTC" | "ckETH" | "SOL" | "ICP"
 
 export interface SwapPool {
   id: string

@@ -299,15 +299,54 @@ export async function loginWithBitcoinWallet(provider: string): Promise<Principa
           }
           
           try {
-            const xverseProvider = new XverseProviders.BitcoinProvider()
-            const response = await xverseProvider.requestAccounts()
-            return response?.accounts?.[0]
+            // BitcoinProvider might be an instance or a constructor
+            // Try using it as an instance first, then as a constructor
+            let xverseProvider: any
+            
+            // Check if BitcoinProvider is already an instance (has requestAccounts method)
+            if (typeof XverseProviders.BitcoinProvider.requestAccounts === "function") {
+              xverseProvider = XverseProviders.BitcoinProvider
+            } 
+            // Check if BitcoinProvider is a constructor (has prototype or can be instantiated)
+            else if (typeof XverseProviders.BitcoinProvider === "function") {
+              xverseProvider = new XverseProviders.BitcoinProvider()
+            }
+            // If it's neither, try accessing it directly
+            else {
+              xverseProvider = XverseProviders.BitcoinProvider
+            }
+            
+            // Try to get accounts
+            let response: any
+            if (typeof xverseProvider.requestAccounts === "function") {
+              response = await xverseProvider.requestAccounts()
+            } else if (typeof xverseProvider.request === "function") {
+              response = await xverseProvider.request({ method: "requestAccounts" })
+            } else {
+              throw new Error("Xverse wallet API not recognized. Please check the wallet extension version.")
+            }
+            
+            // Handle different response formats
+            if (Array.isArray(response)) {
+              return response[0] || response
+            }
+            if (response?.accounts && Array.isArray(response.accounts)) {
+              return response.accounts[0]
+            }
+            if (typeof response === "string") {
+              return response
+            }
+            
+            return response
           } catch (error: any) {
             if (error.code === 4001 || error.message?.includes("reject") || error.message?.includes("denied")) {
               throw new Error("Connection was rejected. Please try again and approve the connection.")
             }
             if (error.message?.includes("locked") || error.message?.includes("unlock")) {
               throw new Error("Wallet is locked. Please unlock your Xverse wallet and try again.")
+            }
+            if (error.message?.includes("not a constructor")) {
+              throw new Error("Xverse wallet API error. Please update the Xverse extension or try refreshing the page.")
             }
             throw new Error(`Failed to connect to Xverse wallet: ${error.message || "Unknown error"}`)
           }

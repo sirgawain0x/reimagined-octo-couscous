@@ -4,6 +4,8 @@ import { createLendingActor, requireAuth } from "@/services/canisters"
 import { logError } from "@/utils/logger"
 import { Principal } from "@dfinity/principal"
 import { useICP } from "./useICP"
+import { retry, retryWithTimeout } from "@/utils/retry"
+import { checkRateLimit } from "@/utils/rateLimiter"
 
 const mockLendingAssets: LendingAsset[] = [
   {
@@ -51,8 +53,16 @@ export function useLending() {
     
     try {
       // getLendingAssets is a query method, so we can use anonymous agent if not authenticated
-      const canister = await createLendingActor(true)
-      const canisterAssets = await canister.getLendingAssets()
+      const canister = await retry(
+        () => createLendingActor(true),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      const canisterAssets = await retryWithTimeout(
+        () => canister.getLendingAssets(),
+        10000, // 10 second timeout for query
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
       
       // Convert canister assets to frontend format
       const formattedAssets: LendingAsset[] = canisterAssets.map((asset) => ({
@@ -72,7 +82,11 @@ export function useLending() {
       // Load user deposits if connected
       if (isConnected && principal) {
         try {
-          const userDeposits = await canister.getUserDeposits(principal)
+          const userDeposits = await retryWithTimeout(
+            () => canister.getUserDeposits(principal),
+            10000,
+            { maxRetries: 3, initialDelayMs: 1000 }
+          )
           const formattedDeposits: LendingDeposit[] = userDeposits.map((deposit) => ({
             asset: deposit.asset,
             amount: Number(deposit.amount) / 1e8, // Convert from nat64
@@ -87,11 +101,35 @@ export function useLending() {
         setDeposits([])
       }
     } catch (error) {
-      logError("Error loading lending data", error as Error)
-      setError("Failed to load lending data from canister")
-      // Use fallback data if canister fails
-      setAssets(mockLendingAssets)
-      setDeposits([])
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorName = error instanceof Error ? error.name : ""
+      
+      // Check if error is due to network mismatch or missing canister (TrustError)
+      if (errorName === "TrustError" || errorMessage.includes("node signatures") || errorMessage.includes("TrustError")) {
+        logError("Network mismatch or canister not found", error as Error)
+        setError("Lending canister not found or network mismatch. Make sure VITE_ICP_NETWORK matches where your canisters are deployed (local vs ic).")
+        // Use fallback data
+        setAssets(mockLendingAssets)
+        setDeposits([])
+      } else if (errorMessage.includes("placeholder") || errorMessage.includes("Invalid canister ID")) {
+        logError("Lending canister not deployed", error as Error)
+        setError("Lending canister is not deployed. Please deploy it or configure a valid canister ID.")
+        // Use fallback data
+        setAssets(mockLendingAssets)
+        setDeposits([])
+      } else if (errorMessage.includes("canister_not_found") || errorMessage.includes("not found")) {
+        logError("Lending canister not found", error as Error)
+        setError("Lending canister not found. Please deploy the lending_canister or check your canister ID configuration.")
+        // Use fallback data
+        setAssets(mockLendingAssets)
+        setDeposits([])
+      } else {
+        logError("Error loading lending data", error as Error)
+        setError("Failed to load lending data from canister")
+        // Use fallback data if canister fails
+        setAssets(mockLendingAssets)
+        setDeposits([])
+      }
     } finally {
       setIsLoading(false)
     }
@@ -114,13 +152,23 @@ export function useLending() {
     }
 
     try {
+      // Frontend rate limiting
+      checkRateLimit("lending", principal.toText())
+      
       // deposit is an update method, requires authentication
-      const canister = await createLendingActor(false)
+      const canister = await retry(
+        () => createLendingActor(false),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
       
       // Convert amount to nat64 (multiply by 1e8 for satoshi-like precision)
       const amountNat64 = BigInt(Math.floor(amount * 1e8))
       
-      const result = await canister.deposit(asset.toLowerCase(), amountNat64)
+      const result = await retryWithTimeout(
+        () => canister.deposit(asset.toLowerCase(), amountNat64),
+        30000, // 30 second timeout for update operations
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
       
       if ("ok" in result) {
         await loadData() // Refresh data
@@ -154,8 +202,14 @@ export function useLending() {
     }
 
     try {
+      // Frontend rate limiting
+      checkRateLimit("lending", principal.toText())
+      
       // withdraw is an update method, requires authentication
-      const canister = await createLendingActor(false)
+      const canister = await retry(
+        () => createLendingActor(false),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
       
       // Convert amount to nat64
       const amountNat64 = BigInt(Math.floor(amount * 1e8))
@@ -168,7 +222,11 @@ export function useLending() {
         return false
       }
       
-      const result = await canister.withdraw(asset.toLowerCase(), amountNat64, address)
+      const result = await retryWithTimeout(
+        () => canister.withdraw(asset.toLowerCase(), amountNat64, address),
+        60000, // 60 second timeout for withdrawal (longer due to Bitcoin processing)
+        { maxRetries: 3, initialDelayMs: 2000 }
+      )
       
       if ("ok" in result) {
         await loadData() // Refresh data

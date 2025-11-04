@@ -4,6 +4,7 @@ module {
   public type ChainKeyToken = {
     #ckBTC;
     #ckETH;
+    #SOL; // Real Solana (not chain-key, uses SOL RPC canister)
     #ICP;
   };
 

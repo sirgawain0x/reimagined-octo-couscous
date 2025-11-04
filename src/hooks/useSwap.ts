@@ -3,6 +3,8 @@ import type { ChainKeyToken, SwapPool, SwapQuote, SwapRecord } from "@/types"
 import { createSwapActor, requireAuth } from "@/services/canisters"
 import { logError } from "@/utils/logger"
 import { useICP } from "./useICP"
+import { retry, retryWithTimeout } from "@/utils/retry"
+import { checkRateLimit } from "@/utils/rateLimiter"
 
 const mockPools: SwapPool[] = [
   {
@@ -18,6 +20,13 @@ const mockPools: SwapPool[] = [
     tokenB: "ICP",
     liquidity: 32000,
     volume24h: 15000,
+  },
+  {
+    id: "SOL_ICP",
+    tokenA: "SOL",
+    tokenB: "ICP",
+    liquidity: 28000,
+    volume24h: 12000,
   },
 ]
 
@@ -37,15 +46,29 @@ export function useSwap() {
     setError(null)
     
     try {
-      // getPools is a query method, so we can use anonymous agent if not authenticated
-      const canister = await createSwapActor(true)
-      const canisterPools = await canister.getPools()
+      const canister = await retry(
+        () => createSwapActor(true),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      const canisterPools = await retryWithTimeout(
+        () => canister.getPools(),
+        10000, // 10 second timeout for query
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
       
       // Convert canister pools to frontend format
+      // ChainKeyToken variants come as objects like { ckBTC: null }, { ckETH: null }, { ckSOL: null }, { ICP: null }
       const formattedPools: SwapPool[] = canisterPools.map((pool, index) => {
         // Extract token names from variant objects
-        const tokenAName = "ckBTC" in pool.tokenA ? "ckBTC" : "ckETH" in pool.tokenA ? "ckETH" : "ICP"
-        const tokenBName = "ckBTC" in pool.tokenB ? "ckBTC" : "ckETH" in pool.tokenB ? "ckETH" : "ICP"
+        const tokenAName = "ckBTC" in pool.tokenA ? "ckBTC" 
+          : "ckETH" in pool.tokenA ? "ckETH" 
+          : "SOL" in pool.tokenA ? "SOL" 
+          : "ICP"
+        const tokenBName = "ckBTC" in pool.tokenB ? "ckBTC" 
+          : "ckETH" in pool.tokenB ? "ckETH" 
+          : "SOL" in pool.tokenB ? "SOL" 
+          : "ICP"
         const poolId = `${tokenAName}_${tokenBName}`
         return {
           id: poolId,
@@ -60,22 +83,29 @@ export function useSwap() {
     } catch (error) {
       logError("Error loading pools", error as Error)
       setError("Failed to load pools from canister")
-      setPools(mockPools) // Fallback to mock data
+      setPools(mockPools)
     } finally {
       setIsLoading(false)
     }
   }
 
   async function getQuote(poolId: string, amountIn: bigint): Promise<SwapQuote | null> {
-    if (amountIn <= 0) {
-      logError("Invalid quote amount", new Error(`Amount must be greater than 0, got ${amountIn}`))
+    if (!amountIn || amountIn <= 0) {
+      setQuote(null)
       return null
     }
 
     try {
-      // getQuote is a query method, so we can use anonymous agent if not authenticated
-      const canister = await createSwapActor(true)
-      const result = await canister.getQuote(poolId, amountIn)
+      const canister = await retry(
+        () => createSwapActor(true),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      const result = await retryWithTimeout(
+        () => canister.getQuote(poolId, amountIn),
+        10000, // 10 second timeout for query
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
       
       if ("ok" in result) {
         const quote: SwapQuote = {
@@ -85,12 +115,10 @@ export function useSwap() {
         }
         setQuote(quote)
         return quote
-      } else if ("err" in result) {
-        logError("Canister returned error", new Error(result.err), { poolId, amountIn })
+      } else {
+        setQuote(null)
         return null
       }
-      
-      return null
     } catch (error) {
       logError("Error getting quote", error as Error, { poolId, amountIn })
       return null
@@ -114,8 +142,14 @@ export function useSwap() {
     }
 
     try {
+      // Frontend rate limiting
+      checkRateLimit("swap", principal.toText())
+      
       // swap is an update method, requires authentication
-      const canister = await createSwapActor(false)
+      const canister = await retry(
+        () => createSwapActor(false),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
       
       // Convert ChainKeyToken string to variant
       let tokenInVariant: any
@@ -123,11 +157,17 @@ export function useSwap() {
         tokenInVariant = { ckBTC: null }
       } else if (tokenIn === "ckETH") {
         tokenInVariant = { ckETH: null }
+      } else if (tokenIn === "SOL") {
+        tokenInVariant = { SOL: null }
       } else {
         tokenInVariant = { ICP: null }
       }
       
-      const result = await canister.swap(poolId, tokenInVariant, amountIn, minAmountOut)
+      const result = await retryWithTimeout(
+        () => canister.swap(poolId, tokenInVariant, amountIn, minAmountOut),
+        30000, // 30 second timeout for swap operations
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
       
       if ("ok" in result) {
         await loadPools() // Refresh pools
@@ -150,13 +190,26 @@ export function useSwap() {
     }
 
     try {
-      // getSwapHistory is a query method, but requires principal so use authenticated agent
-      const canister = await createSwapActor(false)
-      const history = await canister.getSwapHistory(principal)
+      const canister = await retry(
+        () => createSwapActor(true),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      const history = await retryWithTimeout(
+        () => canister.getSwapHistory(principal),
+        10000,
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
       
       return history.map((swap) => {
-        const tokenInName = "ckBTC" in swap.tokenIn ? "ckBTC" : "ckETH" in swap.tokenIn ? "ckETH" : "ICP"
-        const tokenOutName = "ckBTC" in swap.tokenOut ? "ckBTC" : "ckETH" in swap.tokenOut ? "ckETH" : "ICP"
+        const tokenInName = "ckBTC" in swap.tokenIn ? "ckBTC" 
+          : "ckETH" in swap.tokenIn ? "ckETH" 
+          : "SOL" in swap.tokenIn ? "SOL" 
+          : "ICP"
+        const tokenOutName = "ckBTC" in swap.tokenOut ? "ckBTC" 
+          : "ckETH" in swap.tokenOut ? "ckETH" 
+          : "SOL" in swap.tokenOut ? "SOL" 
+          : "ICP"
         return {
           id: swap.id,
           tokenIn: tokenInName as ChainKeyToken,
@@ -167,7 +220,7 @@ export function useSwap() {
         }
       })
     } catch (error) {
-      logError("Error loading swap history", error as Error)
+      logError("Error getting swap history", error as Error)
       return []
     }
   }

@@ -57,9 +57,11 @@ reimagined-octo-couscous/
 │   │   ├── useRewards.ts
 │   │   ├── useLending.ts
 │   │   ├── usePortfolio.ts
-│   │   └── useSwap.ts
+│   │   ├── useSwap.ts
+│   │   └── useBitcoin.ts   # Bitcoin queries via Validation Cloud
 │   ├── services/           # ICP integration services
-│   │   └── icp.ts
+│   │   ├── icp.ts
+│   │   └── validationcloud.ts  # Validation Cloud Bitcoin RPC client
 │   ├── types/              # TypeScript types
 │   │   ├── index.ts
 │   │   └── canisters.ts
@@ -114,6 +116,11 @@ VITE_ICP_NETWORK=local
 # VITE_CANISTER_ID_REWARDS=your-rewards-canister-id
 # VITE_CANISTER_ID_LENDING=your-lending-canister-id
 # VITE_CANISTER_ID_PORTFOLIO=your-portfolio-canister-id
+
+# Validation Cloud Bitcoin API (Optional - for enhanced Bitcoin queries)
+# Get your API key from https://validationcloud.io/
+# VITE_VALIDATION_CLOUD_API_KEY=your_validation_cloud_api_key
+# VITE_BITCOIN_NETWORK=testnet  # or 'mainnet' for production
 ```
 
 **Note:** For local development, you must deploy Internet Identity first. See `INTERNET_IDENTITY_SETUP.md` for detailed instructions. Alternatively, you can use Bitcoin wallet authentication which doesn't require Internet Identity.
@@ -282,7 +289,43 @@ To complete the full implementation:
 - **Build Tool**: Vite
 - **Styling**: Tailwind CSS + Next UI
 - **ICP Integration**: @dfinity/agent, @dfinity/auth-client
+- **Bitcoin Integration**: Validation Cloud RPC API (optional)
 - **Icons**: Lucide React
+
+## Validation Cloud Integration
+
+The application includes optional Validation Cloud integration for enhanced Bitcoin queries from the frontend. Validation Cloud provides:
+
+- **Bitcoin RPC API**: Access to Bitcoin mainnet/testnet via RPC
+- **Blockbook Indexer**: Enhanced blockchain data queries
+- **Esplora API**: Additional Bitcoin data access
+
+### Usage
+
+Validation Cloud is used for:
+- Frontend Bitcoin balance and transaction queries
+- Address validation
+- Block height monitoring
+- Transaction details lookup
+
+**Note**: For canister-side Bitcoin operations, continue using ICP's Bitcoin API.
+
+### Example Usage
+
+```typescript
+import { getValidationCloudClient } from '@/services/validationcloud'
+import { useBitcoinBlockHeight, useBitcoinAddressValidation } from '@/hooks/useBitcoin'
+
+// In a component
+function MyComponent() {
+  const { height, loading } = useBitcoinBlockHeight()
+  const { isValid } = useBitcoinAddressValidation('bc1q...')
+  
+  // Or use the client directly
+  const client = getValidationCloudClient()
+  const info = await client.getBlockchainInfo()
+}
+```
 
 ## Contributing
 

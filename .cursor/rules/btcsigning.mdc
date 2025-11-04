@@ -1,0 +1,208 @@
+---
+description: Before a transaction can be sent to the Bitcoin network, each input must be signed.
+alwaysApply: false
+---
+Signing transactions
+Bitcoin
+Before a transaction can be sent to the Bitcoin network, each input must be signed.
+
+Threshold ECDSA
+Canisters can sign transactions with threshold ECDSA through the sign_with_ecdsa method.
+
+The following snippet shows a simplified example of how to sign a Bitcoin transaction for the special case where all the inputs are referencing outpoints that are owned by own_address and own_address is a P2PKH address.
+
+Motoko
+Rust
+motoko/basic_bitcoin/src/basic_bitcoin/src/P2pkh.mo
+    // Sign a bitcoin transaction.
+    //
+    // IMPORTANT: This method is for demonstration purposes only and it only
+    // supports signing transactions if:
+    //
+    // 1. All the inputs are referencing outpoints that are owned by `own_address`.
+    // 2. `own_address` is a P2PKH address.
+    func sign_transaction(
+        ecdsa_canister_actor : EcdsaCanisterActor,
+        own_public_key : [Nat8],
+        own_address : BitcoinAddress,
+        transaction : Transaction,
+        key_name : Text,
+        derivation_path : [Blob],
+        signer : Types.EcdsaSignFunction,
+    ) : async [Nat8] {
+        // Obtain the scriptPubKey of the source address which is also the
+        // scriptPubKey of the Tx output being spent.
+        switch (Address.scriptPubKey(#p2pkh own_address)) {
+            case (#ok scriptPubKey) {
+                let scriptSigs = Array.init<Script>(transaction.txInputs.size(), []);
+
+                // Obtain scriptSigs for each Tx input.
+                for (i in Iter.range(0, transaction.txInputs.size() - 1)) {
+                    let sighash = transaction.createP2pkhSignatureHash(
+                        scriptPubKey,
+                        Nat32.fromIntWrap(i),
+                        SIGHASH_ALL,
+                    );
+
+                    let signature_sec = await signer(ecdsa_canister_actor, key_name, derivation_path, Blob.fromArray(sighash));
+                    let signature_der = Blob.toArray(Der.encodeSignature(signature_sec));
+
+                    // Append the sighash type.
+                    let encodedSignatureWithSighashType = Array.tabulate<Nat8>(
+                        signature_der.size() + 1,
+                        func(n) {
+                            if (n < signature_der.size()) {
+                                signature_der[n];
+                            } else {
+                                Nat8.fromNat(Nat32.toNat(SIGHASH_ALL));
+                            };
+                        },
+                    );
+
+                    // Create Script Sig which looks like:
+                    // ScriptSig = <Signature> <Public Key>.
+                    let script = [
+                        #data encodedSignatureWithSighashType,
+                        #data own_public_key,
+                    ];
+                    scriptSigs[i] := script;
+                };
+                // Assign ScriptSigs to their associated TxInputs.
+                for (i in Iter.range(0, scriptSigs.size() - 1)) {
+                    transaction.txInputs[i].script := scriptSigs[i];
+                };
+            };
+            // Verify that our own address is P2PKH.
+            case (#err msg) Debug.trap("This example supports signing p2pkh addresses only: " # msg);
+        };
+
+        transaction.toBytes();
+    };
+
+    // Converts a public key to a P2PKH address.
+    func public_key_to_p2pkh_address(network : Network, public_key_bytes : [Nat8]) : BitcoinAddress {
+        let public_key = public_key_bytes_to_public_key(public_key_bytes);
+
+        // Compute the P2PKH address from our public key.
+        P2pkh.deriveAddress(Types.network_to_network_camel_case(network), Publickey.toSec1(public_key, true));
+    };
+
+    func public_key_bytes_to_public_key(public_key_bytes : [Nat8]) : PublicKey {
+        let point = Utils.unwrap(Affine.fromBytes(public_key_bytes, CURVE));
+        Utils.get_ok(Publickey.decode(#point point));
+    };
+};
+
+See full example on GitHub
+Threshold Schnorr
+Canisters can sign transactions with threshold Schnorr through the sign_with_schnorr method.
+
+Signing P2TR key path transactions
+Motoko
+Rust
+motoko/basic_bitcoin/src/basic_bitcoin/src/P2tr.mo
+// Sign a key spend bitcoin taproot transaction.
+//
+// IMPORTANT: This method is for demonstration purposes only and it only
+// supports signing transactions if:
+//
+// 1. All the inputs are referencing outpoints that are owned by `own_address`.
+// 2. `own_address` is a P2TR address.
+public func sign_key_spend_transaction(
+    schnorr_canister_actor : SchnorrCanisterActor,
+    own_address : BitcoinAddress,
+    transaction : Transaction,
+    amounts : [Nat64],
+    key_name : Text,
+    derivation_path : [Blob],
+    aux : ?Types.SchnorrAux,
+    signer : Types.SchnorrSignFunction,
+) : async [Nat8] {
+    // Obtain the scriptPubKey of the source address which is also the
+    // scriptPubKey of the Tx output being spent.
+    switch (Address.scriptPubKey(#p2tr_key own_address)) {
+        case (#ok scriptPubKey) {
+            assert scriptPubKey.size() == 2;
+
+            // Obtain a witness for each Tx input.
+            for (i in Iter.range(0, transaction.txInputs.size() - 1)) {
+                let sighash = transaction.createTaprootKeySpendSignatureHash(
+                    amounts,
+                    scriptPubKey,
+                    Nat32.fromIntWrap(i),
+                );
+
+                let signature = Blob.toArray(await signer(schnorr_canister_actor, key_name, derivation_path, Blob.fromArray(sighash), aux));
+                transaction.witnesses[i] := [signature];
+            };
+        };
+        // Verify that our own address is P2TR key spend address.
+        case (#err msg) Debug.trap("This example supports signing p2tr key spend addresses only: " # msg);
+    };
+
+    transaction.toBytes();
+};
+
+See full example on GitHub
+Signing P2TR script path transactions
+Motoko
+Rust
+motoko/basic_bitcoin/src/basic_bitcoin/src/P2tr.mo
+/// Sign a script spend bitcoin taproot transaction.
+///
+/// IMPORTANT: This method is for demonstration purposes only and it only
+/// supports signing transactions if:
+///
+/// 1. All the inputs are referencing outpoints that are owned by `own_address`.
+/// 2. `own_address` is a P2TR address with a single leaf in MAST that just
+///    allows one key to be used for spending.
+func sign_script_spend_transaction(
+    schnorr_canister_actor : SchnorrCanisterActor,
+    own_address : BitcoinAddress,
+    leaf_script : Script.Script,
+    internal_public_key : [Nat8],
+    tweaked_key_is_even : Bool,
+    transaction : Transaction,
+    amounts : [Nat64],
+    key_name : Text,
+    derivation_path : [Blob],
+    signer : Types.SchnorrSignFunction,
+) : async [Nat8] {
+    let leaf_hash = leafHash(leaf_script);
+
+    assert internal_public_key.size() == 32;
+
+    let script_bytes_sized = Script.toBytes(leaf_script);
+    let script_len : Nat = script_bytes_sized.size() - 1;
+    // remove the size prefix
+    let script_bytes = Array.subArray(script_bytes_sized, 1, script_len);
+
+    let control_block_bytes = control_block(tweaked_key_is_even, internal_public_key);
+    // Obtain the scriptPubKey of the source address which is also the
+    // scriptPubKey of the Tx output being spent.
+    switch (Address.scriptPubKey(#p2tr_key own_address)) {
+        case (#ok scriptPubKey) {
+            assert scriptPubKey.size() == 2;
+
+            // Obtain a witness for each Tx input.
+            for (i in Iter.range(0, transaction.txInputs.size() - 1)) {
+                let sighash = transaction.createTaprootScriptSpendSignatureHash(
+                    amounts,
+                    scriptPubKey,
+                    Nat32.fromIntWrap(i),
+                    leaf_hash,
+                );
+
+                Debug.print("Signing sighash: " # debug_show (sighash));
+
+                let signature = Blob.toArray(await signer(schnorr_canister_actor, key_name, derivation_path, Blob.fromArray(sighash), null));
+                transaction.witnesses[i] := [signature, script_bytes, control_block_bytes];
+            };
+        };
+        // Verify that our own address is P2TR key spend address.
+        case (#err msg) Debug.trap("This example supports signing p2tr key spend addresses only: " # msg);
+    };
+
+    transaction.toBytes();
+};
+

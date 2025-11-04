@@ -3,7 +3,7 @@
  * Ensures all required environment variables are set before the app starts
  */
 
-import { ICP_CONFIG } from "@/config/env"
+import { ICP_CONFIG, VALIDATION_CLOUD_CONFIG } from "@/config/env"
 
 interface ValidationError {
   variable: string
@@ -24,6 +24,21 @@ export function validateEnvironment(): { valid: boolean; errors: ValidationError
       variable: "VITE_ICP_NETWORK",
       message: "VITE_ICP_NETWORK must be either 'local' or 'ic'",
     })
+  }
+
+  // Validate Bitcoin network configuration if Validation Cloud is configured
+  if (VALIDATION_CLOUD_CONFIG.apiKey) {
+    if (!VALIDATION_CLOUD_CONFIG.network) {
+      errors.push({
+        variable: "VITE_BITCOIN_NETWORK",
+        message: "Bitcoin network must be specified (mainnet or testnet) when Validation Cloud is configured",
+      })
+    } else if (!["mainnet", "testnet"].includes(VALIDATION_CLOUD_CONFIG.network)) {
+      errors.push({
+        variable: "VITE_BITCOIN_NETWORK",
+        message: "VITE_BITCOIN_NETWORK must be either 'mainnet' or 'testnet'",
+      })
+    }
   }
 
   // In production, check that canister IDs are set

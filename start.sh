@@ -43,11 +43,26 @@ else
     
     # Try proper dfx stop
     dfx stop 2>/dev/null || true
+    sleep 2
+    
+    # Additional cleanup: kill any remaining PocketIC processes
+    pkill -9 -f "pocket-ic" 2>/dev/null || true
     sleep 1
+    
+    # Clean .dfx state if PocketIC errors persist (but keep canister IDs)
+    if [ -d ".dfx" ]; then
+        echo "🧹 Cleaning PocketIC state..."
+        # Only remove PocketIC-related files, not canister configs
+        find .dfx -name "*pocket*" -type f -delete 2>/dev/null || true
+        find .dfx -name "*.pid" -type f -delete 2>/dev/null || true
+    fi
     
     echo "🔄 Starting dfx with Bitcoin support..."
     echo "   (This may take a minute - dfx is starting in the background)"
-    dfx start --enable-bitcoin --background
+    
+    # Use --clean flag to ensure fresh PocketIC instance
+    dfx start --enable-bitcoin --clean --background 2>&1 | grep -v "Failed to initialize PocketIC" || true
+    
     echo "   Waiting for dfx to be ready..."
     sleep 5
     

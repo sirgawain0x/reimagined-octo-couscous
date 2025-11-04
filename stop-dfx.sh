@@ -20,6 +20,7 @@ fi
 # Kill all dfx and pocket-ic processes
 DFX_PIDS=$(pgrep -f "dfx start" || true)
 POCKET_PIDS=$(pgrep -f "pocket-ic" || true)
+ALL_DFX_PIDS=$(pgrep -f "dfx" || true)
 
 if [ -n "$DFX_PIDS" ]; then
     echo "Killing dfx processes..."
@@ -30,6 +31,16 @@ if [ -n "$POCKET_PIDS" ]; then
     echo "Killing pocket-ic processes..."
     kill -9 $POCKET_PIDS 2>/dev/null || true
 fi
+
+# More aggressive: kill all dfx processes
+if [ -n "$ALL_DFX_PIDS" ]; then
+    echo "Killing all remaining dfx processes..."
+    kill -9 $ALL_DFX_PIDS 2>/dev/null || true
+fi
+
+# Nuclear option: use pkill for any remaining processes
+pkill -9 -f "pocket-ic" 2>/dev/null || true
+pkill -9 -f "dfx" 2>/dev/null || true
 
 # Kill Vite dev servers
 VITE_PIDS=$(pgrep -f "node.*vite" || true)

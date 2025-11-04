@@ -28,5 +28,11 @@ export interface SwapCanister {
   updateBalance: () => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
   withdrawBTC: (amount: bigint, btcAddress: string) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
   getSwapHistory: (userId: Principal) => Promise<SwapRecord[]>
+  getPools: () => Promise<Array<{ tokenA: ChainKeyToken; tokenB: ChainKeyToken; reserveA: bigint; reserveB: bigint; kLast: bigint }>>
+  getSOLBalance: (solAddress: string) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  getSolanaSlot: () => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  getSolanaAddress: (keyName?: string | null) => Promise<{ ok: string; err?: string } | { ok?: string; err: string }>
+  sendSOL: (toAddress: string, amountLamports: bigint, keyName?: string | null) => Promise<{ ok: string; err?: string } | { ok?: string; err: string }>
+  getRecentBlockhash: () => Promise<{ ok: string; err?: string } | { ok?: string; err: string }>
 }
 

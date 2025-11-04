@@ -16,17 +16,6 @@ import Types "./Types";
 import BitcoinUtilsICP "../shared/BitcoinUtilsICP";
 import RateLimiter "../shared/RateLimiter";
 
-// Helper functions for equality and hashing (must be defined before use)
-func depositIdEqual(a : Nat64, b : Nat64) : Bool { a == b };
-func depositIdHash(a : Nat64) : Hash.Hash {
-  // Bespoke hash function for Nat64 that considers all bits
-  // Uses multiplicative hash: hash = (value * prime) mod 2^32
-  let n : Nat = Nat64.toNat(a);
-  let prime : Nat = 2654435761; // 32-bit prime multiplier
-  let hashValue = (n * prime) % 4294967296; // mod 2^32
-  Nat32.fromNat(hashValue) // Hash.Hash is just Nat32, so convert using Nat32.fromNat
-};
-
 persistent actor LendingCanister {
   type LendingAsset = Types.LendingAsset;
   type Deposit = Types.Deposit;
@@ -37,7 +26,14 @@ persistent actor LendingCanister {
 
   // State
   private transient var assets : HashMap.HashMap<Text, LendingAsset> = HashMap.HashMap(0, Text.equal, Text.hash);
-  private transient var deposits : HashMap.HashMap<Nat64, Deposit> = HashMap.HashMap(0, depositIdEqual, depositIdHash);
+  private transient var deposits : HashMap.HashMap<Nat64, Deposit> = HashMap.HashMap(0, func(a : Nat64, b : Nat64) : Bool { a == b }, func(a : Nat64) : Hash.Hash {
+    // Bespoke hash function for Nat64 that considers all bits
+    // Uses multiplicative hash: hash = (value * prime) mod 2^32
+    let n : Nat = Nat64.toNat(a);
+    let prime : Nat = 2654435761; // 32-bit prime multiplier
+    let hashValue = (n * prime) % 4294967296; // mod 2^32
+    Nat32.fromNat(hashValue) // Hash.Hash is just Nat32, so convert using Nat32.fromNat
+  });
   private transient var userDeposits : HashMap.HashMap<Principal, [Nat64]> = HashMap.HashMap(0, Principal.equal, Principal.hash);
   private var nextDepositId : Nat64 = 1;
 

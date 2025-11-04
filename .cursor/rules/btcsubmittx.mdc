@@ -1,0 +1,27 @@
+---
+description: To submit transactions to the Bitcoin network, the Bitcoin API exposes the bitcoin_send_transaction method.
+alwaysApply: false
+---
+Submitting transactions
+Bitcoin
+To submit transactions to the Bitcoin network, the Bitcoin API exposes the bitcoin_send_transaction method.
+
+The following snippet shows how to send a signed transaction to the Bitcoin network:
+
+Motoko
+Rust
+motoko/basic_bitcoin/src/basic_bitcoin/src/BitcoinApi.mo
+  /// Sends a (signed) transaction to the Bitcoin network.
+  ///
+  /// Relies on the `bitcoin_send_transaction` endpoint.
+  /// See https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-bitcoin_send_transaction
+  public func send_transaction(network : Network, transaction : [Nat8]) : async () {
+    let transaction_fee =
+        SEND_TRANSACTION_BASE_COST_CYCLES + transaction.size() * SEND_TRANSACTION_COST_CYCLES_PER_BYTE;
+
+    ExperimentalCycles.add<system>(transaction_fee);
+    await management_canister_actor.bitcoin_send_transaction({
+        network;
+        transaction;
+    })
+  };

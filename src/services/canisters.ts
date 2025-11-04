@@ -9,10 +9,9 @@
  * For now, we'll use a dynamic approach that works with the Candid interfaces
  */
 
-import { Actor, HttpAgent } from "@dfinity/agent"
 import { Principal } from "@dfinity/principal"
 import { IDL } from "@dfinity/candid"
-import { createActor as createActorUtil, getIdentity, getAgent } from "./icp"
+import { createActor as createActorUtil, getIdentity } from "./icp"
 import { ICP_CONFIG } from "@/config/env"
 import type {
   RewardsCanister,
@@ -21,14 +20,6 @@ import type {
   SwapCanister,
 } from "@/types/canisters"
 import { logError, logWarn } from "@/utils/logger"
-
-/**
- * Helper to create an actor from a Candid service definition
- */
-// Helper to create IDL factory for a service
-function createIdlFactory(serviceDefinition: IDL.ServiceClass): () => IDL.ServiceClass {
-  return () => serviceDefinition
-}
 
 /**
  * Create rewards canister actor
@@ -45,11 +36,6 @@ export async function createRewardsActor(allowAnonymous = true): Promise<Rewards
   
   if (!canisterId) {
     throw new Error("Rewards canister ID not configured. Please deploy the rewards_canister with 'dfx deploy rewards_canister' and set VITE_CANISTER_ID_REWARDS in your .env file.")
-  }
-  
-  // Validate canister ID format (should not be placeholder)
-  if (canisterId.includes("777") || canisterId.includes("lp777")) {
-    throw new Error(`Invalid canister ID: ${canisterId}. This appears to be a placeholder. Please deploy the canister and use the actual canister ID.`)
   }
   
   try {
@@ -146,7 +132,7 @@ export async function createPortfolioActor(): Promise<PortfolioCanister> {
   const canisterId = ICP_CONFIG.canisterIds.portfolio || (ICP_CONFIG.network === "local" ? "rrkah-fqaaa-aaaaa-aaaaq-cai" : "")
   
   if (!canisterId) {
-    throw new Error("Portfolio canister ID not configured. Set VITE_CANISTER_ID_PORTFOLIO")
+    throw new Error("Portfolio canister ID not configured. Set VITE_CANISTER_ID_PORTFOLIO or deploy the canister first.")
   }
   
   try {
@@ -183,13 +169,14 @@ export async function createSwapActor(allowAnonymous = true): Promise<SwapCanist
   const canisterId = ICP_CONFIG.canisterIds.swap || (ICP_CONFIG.network === "local" ? "rrkah-fqaaa-aaaaa-aaaaq-cai" : "")
   
   if (!canisterId) {
-    throw new Error("Swap canister ID not configured. Set VITE_CANISTER_ID_SWAP")
+    throw new Error("Swap canister ID not configured. Set VITE_CANISTER_ID_SWAP or deploy the canister first.")
   }
   
   try {
     const ChainKeyToken = IDL.Variant({
       ckBTC: IDL.Null,
       ckETH: IDL.Null,
+      SOL: IDL.Null,
       ICP: IDL.Null,
     })
     
@@ -244,6 +231,26 @@ export async function createSwapActor(allowAnonymous = true): Promise<SwapCanist
         reserveB: IDL.Nat64,
         kLast: IDL.Nat64,
       }))], ["query"]),
+      getSOLBalance: IDL.Func([IDL.Text], [IDL.Variant({
+        ok: IDL.Nat64,
+        err: IDL.Text,
+      })], []),
+      getSolanaSlot: IDL.Func([], [IDL.Variant({
+        ok: IDL.Nat64,
+        err: IDL.Text,
+      })], ["query"]),
+      getSolanaAddress: IDL.Func([IDL.Opt(IDL.Text)], [IDL.Variant({
+        ok: IDL.Text,
+        err: IDL.Text,
+      })], []),
+      sendSOL: IDL.Func([IDL.Text, IDL.Nat64, IDL.Opt(IDL.Text)], [IDL.Variant({
+        ok: IDL.Text,
+        err: IDL.Text,
+      })], []),
+      getRecentBlockhash: IDL.Func([], [IDL.Variant({
+        ok: IDL.Text,
+        err: IDL.Text,
+      })], []),
     })
     
     return createActorUtil<SwapCanister>(canisterId, idlFactory, allowAnonymous)
