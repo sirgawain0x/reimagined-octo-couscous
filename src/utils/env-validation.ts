@@ -3,11 +3,26 @@
  * Ensures all required environment variables are set before the app starts
  */
 
-import { ICP_CONFIG } from "@/config/env"
+import { ICP_CONFIG, VALIDATION_CLOUD_CONFIG } from "@/config/env"
+import { Principal } from "@dfinity/principal"
 
 interface ValidationError {
   variable: string
   message: string
+}
+
+/**
+ * Validate that a string is a valid Principal format
+ * ICP Principals are base32-encoded and typically look like: 'rrkah-fqaaa-aaaaa-aaaaq-cai'
+ */
+function isValidPrincipalFormat(id: string): boolean {
+  try {
+    Principal.fromText(id)
+    // Basic format check: should contain hyphens and be reasonable length
+    return id.length > 0 && id.length < 100 && id.includes("-")
+  } catch {
+    return false
+  }
 }
 
 export function validateEnvironment(): { valid: boolean; errors: ValidationError[] } {
@@ -26,35 +41,41 @@ export function validateEnvironment(): { valid: boolean; errors: ValidationError
     })
   }
 
-  // In production, check that canister IDs are set
+  // Validate Bitcoin network configuration if Validation Cloud is configured
+  if (VALIDATION_CLOUD_CONFIG.apiKey) {
+    if (!VALIDATION_CLOUD_CONFIG.network) {
+      errors.push({
+        variable: "VITE_BITCOIN_NETWORK",
+        message: "Bitcoin network must be specified (mainnet or testnet) when Validation Cloud is configured",
+      })
+    } else if (!["mainnet", "testnet"].includes(VALIDATION_CLOUD_CONFIG.network)) {
+      errors.push({
+        variable: "VITE_BITCOIN_NETWORK",
+        message: "VITE_BITCOIN_NETWORK must be either 'mainnet' or 'testnet'",
+      })
+    }
+  }
+
+  // In production, check that canister IDs are set and valid
   if (ICP_CONFIG.network === "ic") {
-    if (!ICP_CONFIG.canisterIds.rewards) {
-      errors.push({
-        variable: "VITE_CANISTER_ID_REWARDS",
-        message: "Rewards canister ID is required for production",
-      })
+    const validateCanisterId = (id: string | undefined, varName: string, name: string): void => {
+      if (!id) {
+        errors.push({
+          variable: varName,
+          message: `${name} canister ID is required for production`,
+        })
+      } else if (!isValidPrincipalFormat(id)) {
+        errors.push({
+          variable: varName,
+          message: `${name} canister ID has invalid format. Expected Principal format (e.g., 'rrkah-fqaaa-aaaaa-aaaaq-cai')`,
+        })
+      }
     }
 
-    if (!ICP_CONFIG.canisterIds.lending) {
-      errors.push({
-        variable: "VITE_CANISTER_ID_LENDING",
-        message: "Lending canister ID is required for production",
-      })
-    }
-
-    if (!ICP_CONFIG.canisterIds.portfolio) {
-      errors.push({
-        variable: "VITE_CANISTER_ID_PORTFOLIO",
-        message: "Portfolio canister ID is required for production",
-      })
-    }
-
-    if (!ICP_CONFIG.canisterIds.swap) {
-      errors.push({
-        variable: "VITE_CANISTER_ID_SWAP",
-        message: "Swap canister ID is required for production",
-      })
-    }
+    validateCanisterId(ICP_CONFIG.canisterIds.rewards, "VITE_CANISTER_ID_REWARDS", "Rewards")
+    validateCanisterId(ICP_CONFIG.canisterIds.lending, "VITE_CANISTER_ID_LENDING", "Lending")
+    validateCanisterId(ICP_CONFIG.canisterIds.portfolio, "VITE_CANISTER_ID_PORTFOLIO", "Portfolio")
+    validateCanisterId(ICP_CONFIG.canisterIds.swap, "VITE_CANISTER_ID_SWAP", "Swap")
   }
 
   // Internet Identity URL should always be set

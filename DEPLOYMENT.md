@@ -4,6 +4,27 @@
 
 This guide will help you set up and deploy the Bitcoin-enabled shopping rewards platform on ICP with Motoko canisters.
 
+## Important: ICP Network Options
+
+**ICP has only two deployment environments:**
+
+1. **Local** (`dfx start` or `--network local`) - Free, runs on your machine
+2. **Mainnet** (`--network ic`) - Requires cycles (costs ICP)
+
+**There is NO free ICP testnet.** When you deploy with `--network ic`, you're deploying to mainnet, which requires cycles.
+
+### Understanding "Testnet" in This Project
+
+The "testnet" references in this codebase refer to:
+- **Bitcoin testnet** - Your canisters can interact with Bitcoin testnet via ICP's Bitcoin API (separate from the ICP network)
+- **ckBTC testnet services** - Testnet versions of ckBTC ledger/minter canisters
+
+These are separate from the ICP network. You can deploy to ICP mainnet while using Bitcoin testnet and ckBTC testnet services for testing.
+
+For more details, see:
+- `MAINNET_DEPLOYMENT.md` - Complete guide for mainnet deployment
+- `TESTNET_DEPLOYMENT.md` - Guide for configuring Bitcoin/ckBTC testnet
+
 ## Prerequisites
 
 ### Required Software
@@ -104,7 +125,7 @@ dfx deploy ic_siwb_provider --argument $'(
     salt = "123456";
     network = opt "testnet";
     scheme = opt "http";
-    statement = opt "Login to ICP Rewards Platform";
+    statement = opt "Login to BitRewards Platform";
     sign_in_expires_in = opt 1500000000000;
     session_expires_in = opt 604800000000000;
     targets = null;

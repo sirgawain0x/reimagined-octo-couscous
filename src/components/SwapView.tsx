@@ -1,12 +1,14 @@
 import { useState } from "react"
 import { ArrowDownUp, ArrowRight, Info } from "lucide-react"
 import { useSwap } from "@/hooks/useSwap"
+import { SolanaInfo } from "@/components/SolanaInfo"
 import { logError } from "@/utils/logger"
 
 const TOKENS = [
   { symbol: "ckBTC", name: "Chain-Key Bitcoin", decimals: 8, icon: "₿" },
   { symbol: "ICP", name: "Internet Computer", decimals: 8, icon: "∞" },
   { symbol: "ckETH", name: "Chain-Key Ethereum", decimals: 18, icon: "Ξ" },
+  { symbol: "SOL", name: "Solana", decimals: 9, icon: "◎" },
 ]
 
 export default function SwapView() {
@@ -28,7 +30,10 @@ export default function SwapView() {
     setFromAmount(amount)
     
     if (amount && parseFloat(amount) > 0) {
-      const amountBigInt = BigInt(Math.floor(parseFloat(amount) * 10_000_000))
+      const fromTokenInfo = TOKENS.find((t) => t.symbol === fromToken)
+      const decimals = fromTokenInfo?.decimals || 8
+      const multiplier = BigInt(10 ** decimals)
+      const amountBigInt = BigInt(Math.floor(parseFloat(amount) * Number(multiplier)))
       await getQuote(selectedPool, amountBigInt)
     } else {
       // setQuote(null)
@@ -40,7 +45,10 @@ export default function SwapView() {
 
     setIsSwapping(true)
     try {
-      const amountIn = BigInt(Math.floor(parseFloat(fromAmount) * 10_000_000))
+      const fromTokenInfo = TOKENS.find((t) => t.symbol === fromToken)
+      const decimals = fromTokenInfo?.decimals || 8
+      const multiplier = BigInt(10 ** decimals)
+      const amountIn = BigInt(Math.floor(parseFloat(fromAmount) * Number(multiplier)))
       const minAmountOut = BigInt(Math.floor(Number(quote.amountOut) * 0.95)) // 5% slippage
 
       const result = await executeSwap(
@@ -64,8 +72,9 @@ export default function SwapView() {
   const fromTokenInfo = TOKENS.find((t) => t.symbol === fromToken)
   const toTokenInfo = TOKENS.find((t) => t.symbol === toToken)
 
-  // Calculate output amount
-  const outputAmount = quote ? Number(quote.amountOut) / 10_000_000 : 0
+  // Calculate output amount using correct decimals for the destination token
+  const toTokenDecimals = toTokenInfo?.decimals || 8
+  const outputAmount = quote ? Number(quote.amountOut) / (10 ** toTokenDecimals) : 0
 
   if (isLoading) {
     return (
@@ -79,10 +88,10 @@ export default function SwapView() {
     <div className="animate-fade-in max-w-2xl mx-auto">
       <h1 className="text-4xl font-extrabold text-white mb-4">Swap Tokens</h1>
       <h2 className="text-2xl font-light text-gray-300 mb-8">
-        Trade ckBTC, ckETH, and ICP instantly
+        Trade ckBTC, ckETH, SOL, and ICP instantly
       </h2>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:items-start">
         {/* Swap Form */}
         <div className="lg:col-span-2">
           <div className="bg-gray-800 rounded-xl shadow-lg p-6 space-y-4">
@@ -145,7 +154,7 @@ export default function SwapView() {
                 </select>
                 <div className="flex-1 bg-gray-700 rounded-lg border border-gray-600 px-4 py-3 text-white">
                   <div className="text-right text-lg">
-                    {outputAmount.toFixed(8)}
+                    {outputAmount.toFixed(toTokenInfo?.decimals || 8)}
                   </div>
                 </div>
               </div>
@@ -167,7 +176,7 @@ export default function SwapView() {
                 </div>
                 <div className="flex justify-between text-gray-300">
                   <span>Fee (0.3%)</span>
-                  <span>{(Number(quote.fee) / 10_000_000).toFixed(8)}</span>
+                  <span>{(Number(quote.fee) / (10 ** (toTokenInfo?.decimals || 8))).toFixed(8)}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-gray-400 pt-2 border-t border-gray-600">
                   <Info className="h-4 w-4" />
@@ -225,15 +234,16 @@ export default function SwapView() {
         </div>
 
         {/* Info Panel */}
-        <div className="lg:col-span-1">
-          <div className="bg-gray-800 rounded-xl shadow-lg p-6 sticky top-28">
+        <div className="lg:col-span-1 space-y-6">
+          <div className="bg-gray-800 rounded-xl shadow-lg p-6">
             <h2 className="text-xl font-bold text-white mb-4">Swap Info</h2>
             
             <div className="space-y-4 text-sm">
               <div>
                 <h3 className="text-gray-400 mb-2">How it works</h3>
                 <ul className="space-y-1 text-gray-300">
-                  <li>• Chain-Key tokens are 1:1 Bitcoin/Ethereum on ICP</li>
+                  <li>• Chain-Key tokens (ckBTC, ckETH) are 1:1 on ICP</li>
+                  <li>• SOL is native Solana via SOL RPC canister</li>
                   <li>• Direct swaps via automated market maker (AMM)</li>
                   <li>• No bridges or custodians required</li>
                 </ul>
@@ -257,6 +267,9 @@ export default function SwapView() {
               </div>
             </div>
           </div>
+
+          {/* Solana Info Panel */}
+          <SolanaInfo />
         </div>
       </div>
     </div>

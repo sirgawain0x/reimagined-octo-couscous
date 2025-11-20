@@ -14,6 +14,15 @@ export const ICP_CONFIG = {
   },
 } as const
 
+export const VALIDATION_CLOUD_CONFIG = {
+  apiKey: import.meta.env.VITE_VALIDATION_CLOUD_API_KEY || "",
+  network: (import.meta.env.VITE_BITCOIN_NETWORK || "testnet") as "mainnet" | "testnet",
+  solana: {
+    devnet: import.meta.env.VITE_VALIDATION_CLOUD_SOLANA_DEVNET || "https://devnet.solana.validationcloud.io/v1/WYszimlgQzHUV_TqIVIV-l_FQ1jCUEYY0tGBId0VKy0",
+    mainnet: import.meta.env.VITE_VALIDATION_CLOUD_SOLANA_MAINNET || "https://mainnet.solana.validationcloud.io/v1/gvRvjzER-2hsL04FVN4_Xg9RvaxLl7SkOshnvphtnOU",
+  },
+} as const
+
 export const isLocalNetwork = ICP_CONFIG.network === "local"
 export const host = isLocalNetwork ? "http://localhost:4943" : "https://ic0.app"
 

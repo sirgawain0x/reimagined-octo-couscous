@@ -1,4 +1,3 @@
-import React from "react"
 import { Button, Card, CardBody } from "@nextui-org/react"
 import { AlertTriangle } from "lucide-react"
 

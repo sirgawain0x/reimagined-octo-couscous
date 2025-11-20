@@ -18,70 +18,102 @@ module BitcoinUtils {
     #P2TR;
   };
 
-  /// Generate Bitcoin address from public key hash
+  public type Network = {
+    #Mainnet;
+    #Testnet;
+    #Regtest;
+  };
+
+  /// Generate Bitcoin address from public key hash with network support
   public func generateAddress(
     publicKeyHash : [Nat8],
-    addressType : AddressType
+    addressType : AddressType,
+    network : Network
   ) : Text {
     switch addressType {
-      case (#P2PKH) generateP2PKH(publicKeyHash);
-      case (#P2SH) generateP2SH(publicKeyHash);
-      case (#P2WPKH) generateP2WPKH(publicKeyHash);
-      case (#P2WSH) generateP2WSH(publicKeyHash);
-      case (#P2TR) generateP2TR(publicKeyHash);
+      case (#P2PKH) generateP2PKH(publicKeyHash, network);
+      case (#P2SH) generateP2SH(publicKeyHash, network);
+      case (#P2WPKH) generateP2WPKH(publicKeyHash, network);
+      case (#P2WSH) generateP2WSH(publicKeyHash, network);
+      case (#P2TR) generateP2TR(publicKeyHash, network);
+    }
+  };
+
+  /// Get network prefix for Bech32 addresses
+  func getNetworkPrefix(network : Network) : Text {
+    switch network {
+      case (#Mainnet) "bc";
+      case (#Testnet) "tb";
+      case (#Regtest) "bcrt";
+    }
+  };
+
+  /// Get version byte for P2PKH addresses
+  func getP2PKHVersionByte(network : Network) : Nat8 {
+    switch network {
+      case (#Mainnet) 0 : Nat8;   // 0x00
+      case (#Testnet) 111 : Nat8; // 0x6f
+      case (#Regtest) 111 : Nat8; // 0x6f (regtest uses testnet version)
+    }
+  };
+
+  /// Get version byte for P2SH addresses
+  func getP2SHVersionByte(network : Network) : Nat8 {
+    switch network {
+      case (#Mainnet) 5 : Nat8;   // 0x05
+      case (#Testnet) 196 : Nat8; // 0xc4
+      case (#Regtest) 196 : Nat8; // 0xc4 (regtest uses testnet version)
     }
   };
 
   /// Generate P2PKH (Pay-to-PubKey-Hash) address
-  func generateP2PKH(publicKeyHash : [Nat8]) : Text {
-    // Add version byte (0x00 for mainnet, 0x6f for testnet)
-    let versionedHash = Array.append([0 : Nat8], publicKeyHash);
-    // Base58Check encode
+  func generateP2PKH(publicKeyHash : [Nat8], network : Network) : Text {
+    let versionByte = getP2PKHVersionByte(network);
+    let versionedHash = Array.append([versionByte], publicKeyHash);
     Base58Check.encode(versionedHash)
   };
 
   /// Generate P2SH (Pay-to-Script-Hash) address
-  func generateP2SH(scriptHash : [Nat8]) : Text {
-    // Add version byte (0x05 for mainnet, 0xc4 for testnet)
-    let versionedHash = Array.append([5 : Nat8], scriptHash);
-    // Base58Check encode
+  func generateP2SH(scriptHash : [Nat8], network : Network) : Text {
+    let versionByte = getP2SHVersionByte(network);
+    let versionedHash = Array.append([versionByte], scriptHash);
     Base58Check.encode(versionedHash)
   };
 
   /// Generate P2WPKH (Pay-to-Witness-PubKey-Hash) address
-  func generateP2WPKH(publicKeyHash : [Nat8]) : Text {
-    // Segwit encode for mainnet (version 0 witness program)
+  func generateP2WPKH(publicKeyHash : [Nat8], network : Network) : Text {
+    let prefix = getNetworkPrefix(network);
     let witnessProgram = {
       version = 0 : Nat8;
       program = publicKeyHash;
     };
-    switch (Segwit.encode("bc", witnessProgram)) {
+    switch (Segwit.encode(prefix, witnessProgram)) {
       case (#ok(address)) address;
       case (#err(_)) ""; // Fallback - should not happen
     }
   };
 
   /// Generate P2WSH (Pay-to-Witness-Script-Hash) address
-  func generateP2WSH(scriptHash : [Nat8]) : Text {
-    // Segwit encode for mainnet (version 0 witness program)
+  func generateP2WSH(scriptHash : [Nat8], network : Network) : Text {
+    let prefix = getNetworkPrefix(network);
     let witnessProgram = {
       version = 0 : Nat8;
       program = scriptHash;
     };
-    switch (Segwit.encode("bc", witnessProgram)) {
+    switch (Segwit.encode(prefix, witnessProgram)) {
       case (#ok(address)) address;
       case (#err(_)) ""; // Fallback - should not happen
     }
   };
 
   /// Generate P2TR (Pay-to-Taproot) address
-  func generateP2TR(xOnlyPublicKey : [Nat8]) : Text {
-    // Generate Taproot address (version 1 witness program)
+  func generateP2TR(xOnlyPublicKey : [Nat8], network : Network) : Text {
+    let prefix = getNetworkPrefix(network);
     let witnessProgram = {
       version = 1 : Nat8;
       program = xOnlyPublicKey;
     };
-    switch (Segwit.encode("bc", witnessProgram)) {
+    switch (Segwit.encode(prefix, witnessProgram)) {
       case (#ok(address)) address;
       case (#err(_)) ""; // Fallback - should not happen
     }

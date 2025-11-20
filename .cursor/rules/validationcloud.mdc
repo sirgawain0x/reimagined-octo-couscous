@@ -1,0 +1,255 @@
+---
+description: Bitcoin is a decentralized, proof-of-work Layer-1 blockchain that uses a UTXO model to secure peer-to-peer value transfer validated by miners and full nodes.
+alwaysApply: false
+---
+# Overview
+
+Bitcoin is a decentralized, proof-of-work Layer-1 blockchain that uses a UTXO model to secure peer-to-peer value transfer validated by miners and full nodes.
+
+Bitcoin's native token is `BTC` .
+
+`satoshis` are the smallest unit of currency on the Bitcoin blockchain, there are 100 million satoshis in 1 Bitcoin, equally 1 satoshi = 0.00000001 BTC.&#x20;
+
+## Network Support
+
+| Network                                                  | HTTPS | WSS |
+| -------------------------------------------------------- | ----- | --- |
+| Mainnet - including Blockbook & Esplora Indexer support  | ✅     | N/A |
+| Testnet (Testnet3) - Blockbook & Esplora Indexer support | ✅     | N/A |
+
+## Compute Units
+
+<table data-header-hidden><thead><tr><th></th><th width="100"></th></tr></thead><tbody><tr><td>getbestblockhash</td><td>10</td></tr><tr><td>getblock</td><td>10</td></tr><tr><td>getblockchaininfo</td><td>10</td></tr><tr><td>getblockcount</td><td>10</td></tr><tr><td>getblockhash</td><td>10</td></tr><tr><td>getblockheader</td><td>10</td></tr><tr><td>getblockstats</td><td>10</td></tr><tr><td>getchaintips</td><td>10</td></tr><tr><td>getchaintxstats</td><td>10</td></tr><tr><td>getdifficulty</td><td>10</td></tr><tr><td>getmempoolancestors</td><td>10</td></tr><tr><td>getmempooldescendants</td><td>10</td></tr><tr><td>getmempoolinfo</td><td>10</td></tr><tr><td>getrawmempool</td><td>10</td></tr><tr><td>gettxout</td><td>10</td></tr><tr><td>gettxoutproof</td><td>10</td></tr><tr><td>gettxoutsetinfo</td><td>10</td></tr><tr><td>getmemoryinfo</td><td>10</td></tr><tr><td>getconnectioncount</td><td>10</td></tr><tr><td>decoderawtransaction</td><td>10</td></tr><tr><td>decodescript</td><td>10</td></tr><tr><td>getrawtransaction</td><td>10</td></tr><tr><td>sendrawtransaction</td><td>10</td></tr><tr><td>testmempoolaccept</td><td>10</td></tr><tr><td>estimatesmartfee</td><td>10</td></tr><tr><td>getindexinfo</td><td>10</td></tr><tr><td>validateaddress</td><td>10</td></tr><tr><td>verifymessage</td><td>10</td></tr></tbody></table>
+
+All **Blockbook & Esplora Indexer REST API** methods are valued at `10` Compute Units.
+
+# Blockchain RPCs
+
+- [getbestblockhash](/v1/bitcoin/blockchain-rpcs/getbestblockhash.md)
+- [getblock](/v1/bitcoin/blockchain-rpcs/getblock.md)
+- [getblockchaininfo](/v1/bitcoin/blockchain-rpcs/getblockchaininfo.md)
+- [getblockcount](/v1/bitcoin/blockchain-rpcs/getblockcount.md)
+- [getblockhash](/v1/bitcoin/blockchain-rpcs/getblockhash.md)
+- [getblockheader](/v1/bitcoin/blockchain-rpcs/getblockheader.md)
+- [getblockstats](/v1/bitcoin/blockchain-rpcs/getblockstats.md)
+- [getchaintips](/v1/bitcoin/blockchain-rpcs/getchaintips.md)
+- [getchaintxstats](/v1/bitcoin/blockchain-rpcs/getchaintxstats.md)
+- [getdifficulty](/v1/bitcoin/blockchain-rpcs/getdifficulty.md)
+- [getmempoolancestors](/v1/bitcoin/blockchain-rpcs/getmempoolancestors.md)
+- [getmempooldescendants](/v1/bitcoin/blockchain-rpcs/getmempooldescendants.md)
+- [getmempoolinfo](/v1/bitcoin/blockchain-rpcs/getmempoolinfo.md)
+- [getrawmempool](/v1/bitcoin/blockchain-rpcs/getrawmempool.md)
+- [gettxout](/v1/bitcoin/blockchain-rpcs/gettxout.md)
+- [gettxoutproof](/v1/bitcoin/blockchain-rpcs/gettxoutproof.md)
+- [gettxoutsetinfo](/v1/bitcoin/blockchain-rpcs/gettxoutsetinfo.md)
+
+# getmemoryinfo
+
+Returns an object containing information about memory usage.
+
+This method will use `10` [Compute Units](https://docs.validationcloud.io/v1/about/billing).
+
+***
+
+## **Reference:** [**Here**](https://developer.bitcoin.org/reference/rpc/getmemoryinfo.html)
+
+## **Parameters**
+
+**`mode`** - string, optional, default=”stats”
+
+**determines what kind of information is returned.**
+
+* “stats” returns general statistics about memory usage in the daemon.
+* “mallocinfo” returns an XML string describing low-level heap state (only available if compiled with glibc 2.10+).
+
+## Returns (mode "stats")
+
+```json
+{                         (json object)
+  "locked" : {            (json object) Information about locked memory manager
+    "used" : n,           (numeric) Number of bytes used
+    "free" : n,           (numeric) Number of bytes available in current arenas
+    "total" : n,          (numeric) Total number of bytes managed
+    "locked" : n,         (numeric) Amount of bytes that succeeded locking. If this number is smaller than total, locking pages failed at some point and key data could be swapped to disk.
+    "chunks_used" : n,    (numeric) Number allocated chunks
+    "chunks_free" : n     (numeric) Number unused chunks
+  }
+}
+```
+
+## Returns (mode "mallocinfo")
+
+| Name | Type   | Description               |
+| ---- | ------ | ------------------------- |
+| str  | string | "`<malloc version=”1”>…"` |
+
+{% tabs %}
+{% tab title="mainnet" %}
+
+```bash
+curl https://mainnet.bitcoin.validationcloud.io/v1/<YOUR_API_KEY_HERE> \
+ -X POST \
+ -H "Content-Type: application/json" \
+ -d '{
+	"jsonrpc": "1.0",
+	"id": "curltest",
+	"method": "getmemoryinfo",
+	"params": []
+}'
+```
+
+{% endtab %}
+
+{% tab title="testnet" %}
+
+```bash
+curl https://testnet.bitcoin.validationcloud.io/v1/<YOUR_API_KEY_HERE> \
+ -X POST \
+ -H "Content-Type: application/json" \
+ -d '{
+	"jsonrpc": "1.0",
+	"id": "curltest",
+	"method": "getmemoryinfo",
+	"params": []
+}'
+```
+
+{% endtab %}
+{% endtabs %}
+
+# getconnectioncount
+
+Returns the number of connections to other nodes.
+
+This method will use `10` [Compute Units](https://docs.validationcloud.io/v1/about/billing).
+
+***
+
+## **Reference:** [**Here**](https://developer.bitcoin.org/reference/rpc/getconnectioncount.html)
+
+## Returns
+
+| Name | Type    | Description          |
+| ---- | ------- | -------------------- |
+| n    | numeric | The connection count |
+
+{% tabs %}
+{% tab title="mainnet" %}
+
+```bash
+curl https://mainnet.bitcoin.validationcloud.io/v1/<YOUR_API_KEY_HERE> \
+ -X POST \
+ -H "Content-Type: application/json" \
+ -d '{
+	"jsonrpc": "1.0",
+	"id": "curltest",
+	"method": "getconnectioncount",
+	"params": []
+}'
+```
+
+{% endtab %}
+
+{% tab title="testnet" %}
+
+```bash
+curl https://testnet.bitcoin.validationcloud.io/v1/<YOUR_API_KEY_HERE> \
+ -X POST \
+ -H "Content-Type: application/json" \
+ -d '{
+	"jsonrpc": "1.0",
+	"id": "curltest",
+	"method": "getconnectioncount",
+	"params": []
+}'
+```
+
+{% endtab %}
+{% endtabs %}
+
+# Rawtransactions RPCs
+
+- [decoderawtransaction](/v1/bitcoin/rawtransactions-rpcs/decoderawtransaction.md)
+- [decodescript](/v1/bitcoin/rawtransactions-rpcs/decodescript.md)
+- [getrawtransaction](/v1/bitcoin/rawtransactions-rpcs/getrawtransaction.md)
+- [sendrawtransaction](/v1/bitcoin/rawtransactions-rpcs/sendrawtransaction.md)
+- [testmempoolaccept](/v1/bitcoin/rawtransactions-rpcs/testmempoolaccept.md)
+
+# Util RPCs
+
+- [estimatesmartfee](/v1/bitcoin/util-rpcs/estimatesmartfee.md)
+- [getindexinfo](/v1/bitcoin/util-rpcs/getindexinfo.md)
+- [validateaddress](/v1/bitcoin/util-rpcs/validateaddress.md)
+- [verifymessage](/v1/bitcoin/util-rpcs/verifymessage.md)
+
+# Blockbook Indexer REST API
+
+Validation Cloud offers access to an indexed version of the Bitcoin blockchain using the [Blockbook REST API methods](https://github.com/trezor/blockbook/blob/master/docs/api.md).
+
+# Esplora HTTP API
+
+**Esplora** is an open-source block explorer and RESTful HTTP API for the Bitcoin blockchain, built by Blockstream.
+
+Validation Cloud Bitcoin nodes support the [Esplora RESTful HTTP API](https://github.com/Blockstream/esplora/blob/master/API.md) for querying Bitcoin blockchain data, including blocks, addresses, transactions, UTXOs, and mempool information.&#x20;
+
+Developers can use Esplora as a backend to interact with Bitcoin data without needing to parse raw blockchain files or operate their own full indexing logic. Applications such as wallets, analytics platforms, and dashboards integrate Esplora to fetch real-time chain data efficiently.
+
+Amounts returned in API calls are always represented in satoshis.
+
+# Bitcoin Testnet 
+
+https://testnet.bitcoin.validationcloud.io/v1/<YOUR_API_KEY_HERE>
+
+async function getLatestBlockHeight() {
+  try {
+    const url = 'https://testnet.bitcoin.validationcloud.io/v1/<YOUR_API_KEY_HERE>';
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '1.0',
+        id: 1,
+        method: 'getblockchaininfo',
+        params: [],
+      }),
+    }).then(response => response.json());
+
+    console.log('Latest Block Height:', response.result.blocks);
+  } catch (error) {
+    console.error('Error fetching block height:', error);
+  }
+}
+
+getLatestBlockHeight();
+
+# Bitcoin Mainnet
+
+https://mainnet.bitcoin.validationcloud.io/v1/<YOUR_API_KEY_HERE>
+
+async function getLatestBlockHeight() {
+  try {
+    const url = 'https://mainnet.bitcoin.validationcloud.io/v1/<YOUR_API_KEY_HERE>';
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '1.0',
+        id: 1,
+        method: 'getblockchaininfo',
+        params: [],
+      }),
+    }).then(response => response.json());
+
+    console.log('Latest Block Height:', response.result.blocks);
+  } catch (error) {
+    console.error('Error fetching block height:', error);
+  }
+}
+
+getLatestBlockHeight();

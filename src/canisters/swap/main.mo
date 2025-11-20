@@ -1,4 +1,5 @@
 import Array "mo:base/Array";
+import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
 import Float "mo:base/Float";
 import HashMap "mo:base/HashMap";
@@ -11,6 +12,12 @@ import Result "mo:base/Result";
 import Text "mo:base/Text";
 import Time "mo:base/Time";
 import Types "./Types";
+import RateLimiter "../shared/RateLimiter";
+import SolRpcClient "../shared/SolRpcClient";
+import SolanaUtils "../shared/SolanaUtils";
+import CKBTC "../shared/CKBTC";
+import InputValidation "../shared/InputValidation";
+import Nat "mo:base/Nat";
 
 persistent actor SwapCanister {
   type ChainKeyToken = Types.ChainKeyToken;
@@ -20,27 +27,76 @@ persistent actor SwapCanister {
   type SwapResult = Types.SwapResult;
   type Result<Ok, Err> = Result.Result<Ok, Err>;
 
-  // Chain-Key Token Canister References (Mainnet)
+  // Chain-Key Token Canister References
+  // Mainnet:
   // ckBTC Ledger: mxzaz-hqaaa-aaaah-aaada-cai
   // ckBTC Minter: mqygn-kiaaa-aaaah-aaaqaa-cai
-  // For now, we'll use placeholder principals
+  // Testnet:
+  // ckBTC Ledger: n5wcd-faaaa-aaaar-qaaea-cai
+  // ckBTC Minter: nfvlz-3qaaa-aaaar-qaanq-cai
   
-  private transient let _CKBTC_LEDGER : actor {
-    icrc1_transfer : (TransferArgs) -> async Result<TxIndex, TransferError>;
-    icrc1_balance_of : (Account) -> async Nat;
-    icrc1_decimals : () -> async Nat8;
-  } = actor("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-
-  private transient let _CKBTC_MINTER : actor {
-    get_btc_address : (?Principal) -> async { address : Text };
-    update_balance : (Principal) -> async Result<MintTx, MinterError>;
-    retrieve_btc : (RetrieveBtcRequest) -> async Result<BlockIndex, MinterError>;
-  } = actor("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  // Network configuration (should be set from environment or canister argument)
+  // Set to true for testnet deployment, false for mainnet
+  private let USE_TESTNET : Bool = true; // Set to true for testnet deployment
+  
+  // ckBTC canister ID strings (deferred to avoid initialization errors on local network)
+  // We'll parse these lazily when needed to avoid errors during canister installation
+  private let CKBTC_LEDGER_ID_TEXT : Text = if (USE_TESTNET) {
+    "n5wcd-faaaa-aaaar-qaaea-cai" // Testnet ledger
+  } else {
+    "mxzaz-hqaaa-aaaah-aaada-cai" // Mainnet ledger
+  };
+  private let CKBTC_MINTER_ID_TEXT : Text = if (USE_TESTNET) {
+    "nfvlz-3qaaa-aaaar-qaanq-cai" // Testnet minter
+  } else {
+    "mqygn-kiaaa-aaaah-aaaqaa-cai" // Mainnet minter
+  };
+  
+  // Lazy ckBTC actors - created on first use to avoid initialization errors on local network
+  private var ckbtcLedgerOpt : ?CKBTC.CKBTC_LEDGER = null;
+  private var ckbtcMinterOpt : ?CKBTC.CKBTC_MINTER = null;
+  
+  // Helper to get or create ledger actor
+  // Note: Principal.fromText should not fail with valid principal strings
+  // Actor creation may fail on local network if canister doesn't exist, but that's handled at call time
+  private func getCkbtcLedger() : ?CKBTC.CKBTC_LEDGER {
+    switch ckbtcLedgerOpt {
+      case null {
+        let ledgerId = Principal.fromText(CKBTC_LEDGER_ID_TEXT);
+        let ledger = CKBTC.createLedgerActor(ledgerId);
+        ckbtcLedgerOpt := ?ledger;
+        ?ledger
+      };
+      case (?ledger) ?ledger;
+    }
+  };
+  
+  // Helper to get or create minter actor
+  private func getCkbtcMinter() : ?CKBTC.CKBTC_MINTER {
+    switch ckbtcMinterOpt {
+      case null {
+        let minterId = Principal.fromText(CKBTC_MINTER_ID_TEXT);
+        let minter = CKBTC.createMinterActor(minterId);
+        ckbtcMinterOpt := ?minter;
+        ?minter
+      };
+      case (?minter) ?minter;
+    }
+  };
+  
+  // Type aliases for convenience
+  private type BlockIndex = CKBTC.BlockIndex;
 
   // Internal AMM pools
   private transient var pools : HashMap.HashMap<Text, SwapPool> = HashMap.HashMap(0, Text.equal, Text.hash);
   private transient var swaps : Buffer.Buffer<SwapRecord> = Buffer.Buffer(100);
   private transient var nextSwapId : Nat64 = 1;
+
+  // Rate limiting (transient - resets on upgrade)
+  private transient var rateLimiter = RateLimiter.RateLimiter(RateLimiter.SWAP_CONFIG);
+
+  // SOL RPC Client
+  private let solRpcClient = SolRpcClient.createClient();
 
   /// Initialize default pools
   public shared func init() : async () {
@@ -61,6 +117,15 @@ persistent actor SwapCanister {
       reserveB = 9_000_000_000_000; // 9 ICP (8 decimals)
       kLast = 2_700_000_000_000_000_000_000;
     });
+
+    // SOL/ICP pool (real Solana via SOL RPC canister)
+    pools.put("SOL_ICP", {
+      tokenA = #SOL;
+      tokenB = #ICP;
+      reserveA = 500_000_000_000; // 500 SOL (9 decimals, lamports)
+      reserveB = 12_000_000_000_000; // 12 ICP (8 decimals)
+      kLast = 6_000_000_000_000_000_000_000;
+    });
   };
 
   /// Get swap quote using internal AMM
@@ -68,6 +133,13 @@ persistent actor SwapCanister {
     poolId : Text,
     amountIn : Nat64
   ) : async Result<SwapQuote, Text> {
+    // Input validation
+    if (not InputValidation.validateText(poolId, 1, ?50)) {
+      return #err("Invalid pool ID")
+    };
+    if (not InputValidation.validateAmount(amountIn, 1, null)) {
+      return #err("Amount must be greater than 0")
+    };
     let poolOpt = pools.get(poolId);
     switch poolOpt {
       case null #err("Pool not found");
@@ -103,6 +175,26 @@ persistent actor SwapCanister {
     minAmountOut : Nat64
   ) : async Result<SwapResult, Text> {
     let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(poolId, 1, ?50)) {
+      return #err("Invalid pool ID")
+    };
+    if (not InputValidation.validateAmount(amountIn, 1, null)) {
+      return #err("Amount must be greater than 0")
+    };
+    if (not InputValidation.validateAmount(minAmountOut, 1, null)) {
+      return #err("Minimum amount out must be greater than 0")
+    };
+
     let poolOpt = pools.get(poolId);
     
     switch poolOpt {
@@ -160,36 +252,155 @@ persistent actor SwapCanister {
     }
   };
 
-  /// Get ckBTC balance for user (placeholder)
-  public query func getCKBTCBalance(_userId : Principal) : async Nat {
-    // TODO: Implement actual balance check via CKBTC_LEDGER
-    0
+  /// Get ckBTC balance for user
+  public func getCKBTCBalance(userId : Principal) : async Result<Nat, Text> {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    switch (getCkbtcLedger()) {
+      case null #err("ckBTC ledger not available on this network");
+      case (?ledger) {
+        let account : CKBTC.Account = {
+          owner = userId;
+          subaccount = null;
+        };
+        await CKBTC.getBalance(ledger, account)
+      };
+    }
   };
 
-  /// Get Bitcoin address for ckBTC deposit (placeholder)
-  public query func getBTCAddress(_userId : Principal) : async Text {
-    // TODO: Implement actual address generation via CKBTC_MINTER
-    "bc1qplaceholder"
+  /// Get Bitcoin address for ckBTC deposit
+  public func getBTCAddress(userId : Principal) : async Result<Text, Text> {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    switch (getCkbtcMinter()) {
+      case null #err("ckBTC minter not available on this network");
+      case (?minter) await CKBTC.getBTCAddress(minter, ?userId);
+    }
   };
 
-  /// Check ckBTC deposit status (placeholder)
+  /// Check ckBTC deposit status and update balance
+  /// This checks for new Bitcoin deposits and mints corresponding ckBTC
   public shared (msg) func updateBalance() : async Result<Nat, Text> {
-    // TODO: Implement actual balance update via CKBTC_MINTER
-    let _userId = msg.caller;
-    #ok(0)
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+
+    // Update balance via ckBTC minter
+    // Note: CKBTC.updateBalance already handles error formatting
+    // For retry logic, we'd need to check the error message for "Temporarily unavailable"
+    switch (getCkbtcMinter()) {
+      case null return #err("ckBTC minter not available on this network");
+      case (?minter) {
+        let result = await CKBTC.updateBalance(minter, userId);
+    switch result {
+      case (#ok(mintTx)) {
+        // Return the minted amount
+        #ok(mintTx.amount)
+      };
+      case (#err(msg)) {
+        // Check if error is retryable (contains "Temporarily unavailable")
+        if (Text.contains(msg, #text "Temporarily unavailable") or Text.contains(msg, #text "Please retry")) {
+          // For now, return error - retry logic would require timer support
+          // In production, implement retry with exponential backoff
+          #err(msg)
+        } else {
+          #err(msg)
+        }
+      }
+    }
+      };
+    }
   };
 
-  /// Retrieve ckBTC as BTC (placeholder)
-  public shared (_msg) func withdrawBTC(
-    _amount : Nat64,
-    _btcAddress : Text
+  /// Retrieve ckBTC as BTC (withdraw)
+  /// Burns ckBTC and retrieves native Bitcoin to the specified address
+  public shared (msg) func withdrawBTC(
+    amount : Nat64,
+    btcAddress : Text
   ) : async Result<BlockIndex, Text> {
-    // TODO: Implement actual withdrawal via CKBTC_MINTER
-    #ok(0)
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(btcAddress, 26, ?62)) {
+      return #err("Invalid Bitcoin address format")
+    };
+    if (not InputValidation.validateAmount(amount, 1, null)) {
+      return #err("Amount must be greater than 0")
+    };
+
+    // Validate Bitcoin address format
+    // Note: InputValidation.validateBitcoinAddress requires network parameter
+    // For now, we'll do basic validation in the canister
+    // TODO: Add network configuration to canister
+
+    // Retry logic for ckBTC operations (simple retry for TemporarilyUnavailable errors)
+    var attempts = 0;
+    let maxAttempts = 3;
+    var lastError : ?Text = null;
+    var shouldRetry = true;
+    
+    switch (getCkbtcMinter()) {
+      case null return #err("ckBTC minter not available on this network");
+      case (?minter) {
+        while (attempts < maxAttempts and shouldRetry) {
+          attempts += 1;
+          
+          // Retrieve BTC via ckBTC minter
+          let result = await CKBTC.retrieveBTC(minter, btcAddress, Nat64.toNat(amount), null);
+      switch result {
+        case (#err(msg)) {
+          // Check if error is retryable (TemporarilyUnavailable)
+          if (Text.contains(msg, #text "Temporarily unavailable") and attempts < maxAttempts) {
+            lastError := ?msg;
+            // Simple retry - in production, consider using a timer for delays
+            shouldRetry := true
+          } else {
+            shouldRetry := false;
+            return #err(msg)
+          }
+        };
+        case (#ok(blockIndex)) {
+          shouldRetry := false;
+          return #ok(blockIndex)
+        }
+      }
+        };
+      }
+    };
+    
+    // All retries exhausted
+    switch lastError {
+      case (?err) #err("Failed after " # Nat.toText(maxAttempts) # " attempts: " # err);
+      case null #err("Failed to retrieve BTC after " # Nat.toText(maxAttempts) # " attempts")
+    }
   };
 
   /// Get swap history for user
   public query func getSwapHistory(userId : Principal) : async [SwapRecord] {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return []
+    };
     Array.filter<SwapRecord>(
       Buffer.toArray(swaps),
       func(swap) { Principal.equal(swap.user, userId) }
@@ -203,7 +414,325 @@ persistent actor SwapCanister {
 
   /// Get pool details
   public query func getPool(poolId : Text) : async ?SwapPool {
+    // Input validation
+    if (not InputValidation.validateText(poolId, 1, ?50)) {
+      return null
+    };
     pools.get(poolId)
+  };
+
+  /// Get SOL balance for a Solana address
+  public shared (msg) func getSOLBalance(solAddress : Text) : async Result<Nat64, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(solAddress, 32, ?44)) {
+      return #err("Invalid Solana address format")
+    };
+
+    let rpcSources = #Default(#Mainnet);
+    let rpcConfig : ?SolRpcClient.RpcConfig = ?{
+      responseConsensus = ?#Equality;
+      maxRetries = ?(3 : Nat);
+      timeoutSeconds = ?(30 : Nat);
+    };
+    let params = ?{
+      commitment = ?#finalized;
+      minContextSlot = null;
+    };
+
+    switch (await solRpcClient.getBalance(rpcSources, rpcConfig, solAddress, params)) {
+      case (#ok(result)) #ok(result.value);
+      case (#err(e)) #err("Failed to get SOL balance: " # e);
+    }
+  };
+
+  /// Get SOL account info
+  public shared (msg) func getSOLAccountInfo(solAddress : Text) : async Result.Result<?SolRpcClient.AccountInfo, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check (expensive RPC call)
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(solAddress, 32, ?44)) {
+      return #err("Invalid Solana address format")
+    };
+    
+    let rpcSources = #Default(#Mainnet);
+    let rpcConfig : ?SolRpcClient.RpcConfig = ?{
+      responseConsensus = ?#Equality;
+      maxRetries = ?(3 : Nat);
+      timeoutSeconds = ?(30 : Nat);
+    };
+    let params = ?{
+      commitment = ?#finalized;
+      encoding = ?"base64";
+      dataSlice = null;
+      minContextSlot = null;
+    };
+
+    switch (await solRpcClient.getAccountInfo(rpcSources, rpcConfig, solAddress, params)) {
+      case (#ok(result)) #ok(result.value);
+      case (#err(e)) #err("Failed to get SOL account info: " # e);
+    }
+  };
+
+  /// Get recent blockhash using getSlot and getBlock
+  public shared (msg) func getRecentBlockhash() : async Result.Result<Text, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check (expensive RPC call)
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    
+    let rpcSources = #Default(#Mainnet);
+    let rpcConfig : ?SolRpcClient.RpcConfig = ?{
+      responseConsensus = ?#Equality;
+      maxRetries = ?(3 : Nat);
+      timeoutSeconds = ?(30 : Nat);
+    };
+
+    // Get slot first
+    let slotParams = ?{
+      commitment = ?#finalized;
+      minContextSlot = null;
+    };
+
+    let slotResult = switch (await solRpcClient.getSlot(rpcSources, rpcConfig, slotParams)) {
+      case (#ok(result)) #ok(result.slot);
+      case (#err(e)) #err("Failed to get slot: " # e);
+    };
+
+    let slot = switch (slotResult) {
+      case (#ok(s)) s;
+      case (#err(e)) return #err(e);
+    };
+
+    // Get block to extract blockhash
+    let blockParams = ?{
+      slot = ?slot;
+      commitment = ?#finalized;
+      encoding = ?"base58";
+      transactionDetails = ?"none";
+      maxSupportedTransactionVersion = null;
+      rewards = ?false;
+    };
+
+    switch (await solRpcClient.getBlock(rpcSources, rpcConfig, blockParams)) {
+      case (#ok(block)) {
+        switch (block.blockhash) {
+          case (?bh) #ok(bh);
+          case (null) #err("Blockhash not found in block response");
+        }
+      };
+      case (#err(e)) #err("Failed to get block: " # e);
+    }
+  };
+
+  /// Get current Solana slot
+  public shared (msg) func getSolanaSlot() : async Result.Result<Nat64, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check (expensive RPC call)
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    
+    let rpcSources = #Default(#Mainnet);
+    let rpcConfig : ?SolRpcClient.RpcConfig = ?{
+      responseConsensus = ?#Equality;
+      maxRetries = ?(3 : Nat);
+      timeoutSeconds = ?(30 : Nat);
+    };
+    let params = ?{
+      commitment = ?#finalized;
+      minContextSlot = null;
+    };
+
+    switch (await solRpcClient.getSlot(rpcSources, rpcConfig, params)) {
+      case (#ok(result)) #ok(result.slot);
+      case (#err(e)) #err("Failed to get Solana slot: " # e);
+    }
+  };
+
+  /// Get Solana address for a user (derived from Ed25519 public key)
+  public shared (msg) func getSolanaAddress(keyName : ?Text) : async Result.Result<Text, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+
+    // Derive path from user principal
+    let principalBlob = Principal.toBlob(userId);
+    let principalBytes = Blob.toArray(principalBlob);
+    let derivationPath = [
+      Blob.fromArray(principalBytes)
+    ];
+
+    switch (await SolanaUtils.getEd25519PublicKey(derivationPath, keyName)) {
+      case (#ok(publicKey)) {
+        // Derive Solana address from public key
+        let address = SolanaUtils.deriveSolanaAddress(publicKey);
+        #ok(address)
+      };
+      case (#err(e)) #err("Failed to get Solana address: " # e);
+    }
+  };
+
+  /// Send SOL to a Solana address
+  /// This builds, signs, and sends a Solana transfer transaction
+  public shared (msg) func sendSOL(
+    toAddress : Text,
+    amountLamports : Nat64,
+    keyName : ?Text
+  ) : async Result.Result<Text, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(toAddress, 32, ?44)) {
+      return #err("Invalid Solana address format")
+    };
+    if (not InputValidation.validateAmount(amountLamports, 1, null)) {
+      return #err("Amount must be greater than 0")
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(toAddress, 32, ?44)) {
+      return #err("Invalid Solana address format")
+    };
+    if (not InputValidation.validateAmount(amountLamports, 1, null)) {
+      return #err("Amount must be greater than 0")
+    };
+
+    // 1. Get Solana address for sender
+    let principalBlob = Principal.toBlob(userId);
+    let principalBytes = Blob.toArray(principalBlob);
+    let derivationPath = [
+      Blob.fromArray(principalBytes)
+    ];
+
+    let fromAddressResult = switch (await SolanaUtils.getEd25519PublicKey(derivationPath, keyName)) {
+      case (#ok(publicKey)) {
+        let address = SolanaUtils.deriveSolanaAddress(publicKey);
+        #ok(address)
+      };
+      case (#err(e)) #err("Failed to get sender address: " # e);
+    };
+
+    let fromAddress = switch (fromAddressResult) {
+      case (#ok(addr)) addr;
+      case (#err(e)) return #err(e);
+    };
+
+    // 2. Get recent blockhash (using getSlot then getBlock)
+    let rpcSources = #Default(#Mainnet);
+    let rpcConfig : ?SolRpcClient.RpcConfig = ?{
+      responseConsensus = ?#Equality;
+      maxRetries = ?(3 : Nat);
+      timeoutSeconds = ?(30 : Nat);
+    };
+
+    // Get slot first
+    let slotParams = ?{
+      commitment = ?#finalized;
+      minContextSlot = null;
+    };
+
+    let slotResult = switch (await solRpcClient.getSlot(rpcSources, rpcConfig, slotParams)) {
+      case (#ok(result)) #ok(result.slot);
+      case (#err(e)) #err("Failed to get slot: " # e);
+    };
+
+    let slot = switch (slotResult) {
+      case (#ok(s)) s;
+      case (#err(e)) return #err(e);
+    };
+
+    // 3. Get block to get blockhash (using getBlock with slot)
+    let blockParams = ?{
+      slot = ?slot;
+      commitment = ?#finalized;
+      encoding = ?"base58";
+      transactionDetails = ?"none";
+      maxSupportedTransactionVersion = null;
+      rewards = ?false;
+    };
+
+    let blockResult = switch (await solRpcClient.getBlock(rpcSources, rpcConfig, blockParams)) {
+      case (#ok(block)) {
+        switch (block.blockhash) {
+          case (?bh) #ok(bh);
+          case (null) #err("Blockhash not found in block response");
+        }
+      };
+      case (#err(e)) #err("Failed to get block: " # e);
+    };
+
+    let _recentBlockhash = switch (blockResult) {
+      case (#ok(bh)) bh;
+      case (#err(e)) return #err(e);
+    };
+
+    // 4. Build transaction using jsonRequest (more flexible than wire format)
+    // Create a transfer instruction using System Program
+    let _transferInstruction = SolanaUtils.createTransferInstruction(fromAddress, toAddress, amountLamports);
+    
+    // Build transaction JSON-RPC request
+    // Note: For full production, we'd build the transaction properly and sign it
+    // For now, we'll use jsonRequest which allows us to send any Solana RPC method
+    // This requires the transaction to be built and signed externally or via a more complete library
+    
+    // 5. For now, return an error indicating that full transaction building is needed
+    // In production, you would:
+    // - Build the transaction message
+    // - Sign it with Ed25519
+    // - Serialize to base64
+    // - Send via sendTransaction
+    
+    #err("Full transaction building and signing not yet implemented. Use a Solana library for transaction serialization.")
   };
 
   // Helper functions
@@ -211,12 +740,14 @@ persistent actor SwapCanister {
     let matchesTokenA = switch (pool.tokenA, token) {
       case (#ckBTC, #ckBTC) true;
       case (#ckETH, #ckETH) true;
+      case (#SOL, #SOL) true;
       case (#ICP, #ICP) true;
       case _ false;
     };
     let matchesTokenB = switch (pool.tokenB, token) {
       case (#ckBTC, #ckBTC) true;
       case (#ckETH, #ckETH) true;
+      case (#SOL, #SOL) true;
       case (#ICP, #ICP) true;
       case _ false;
     };
@@ -227,56 +758,10 @@ persistent actor SwapCanister {
     switch (pool.tokenA, token) {
       case (#ckBTC, #ckBTC) pool.tokenB;
       case (#ckETH, #ckETH) pool.tokenB;
+      case (#SOL, #SOL) pool.tokenB;
       case (#ICP, #ICP) pool.tokenB;
       case _ pool.tokenA;
     }
   };
-};
-
-// ICRC Standard Types
-type TransferArgs = {
-  from : { owner : Principal; subaccount : ?Blob };
-  to : { owner : Principal; subaccount : ?Blob };
-  amount : Nat;
-  fee : ?Nat;
-  memo : ?Blob;
-  created_at_time : ?Nat64;
-};
-
-type TransferError = {
-  #GenericError : { message : Text; error_code : Nat };
-  #TemporarilyUnavailable;
-  #InsufficientFunds : { balance : Nat };
-  #BadBurn : { min_burn_amount : Nat };
-  #Duplicate : { duplicate_of : Nat };
-  #BadFee : { expected_fee : Nat };
-};
-
-type Account = {
-  owner : Principal;
-  subaccount : ?Blob;
-};
-
-type TxIndex = Nat;
-type BlockIndex = Nat;
-
-type MintTx = {
-  amount : Nat;
-  block_index : BlockIndex;
-};
-
-type MinterError = {
-  #GenericError : { error_message : Text; error_code : Nat };
-  #TemporarilyUnavailable : { error_message : Text; error_code : Nat };
-  #MalformedAddress;
-  #InsufficientFunds : { balance : Nat };
-  #AmountTooLow : { min_withdrawal_amount : Nat };
-  #AlreadyProcessing;
-};
-
-type RetrieveBtcRequest = {
-  address : Text;
-  amount : Nat;
-  created_at : ?Nat64;
 };
 

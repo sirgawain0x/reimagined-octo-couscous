@@ -1,0 +1,162 @@
+---
+description: ICP smart contracts can query information about the Bitcoin mainnet or testnet programmatically.
+alwaysApply: false
+---
+Reading the Bitcoin state
+Bitcoin
+ICP smart contracts can query information about the Bitcoin mainnet or testnet programmatically.
+
+Reading unspent transaction outputs (UTXOs)
+To read unspent transaction outputs from the Bitcoin network, make a call to the bitcoin_get_utxos Bitcoin API method.
+
+Motoko
+motoko/basic_bitcoin/src/basic_bitcoin/src/BitcoinApi.mo
+/// Returns the UTXOs of the given Bitcoin address.
+///
+/// NOTE: Relies on the `bitcoin_get_utxos` endpoint.
+/// See https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-bitcoin_get_utxos
+public func get_utxos(network : Network, address : BitcoinAddress) : async GetUtxosResponse {
+  ExperimentalCycles.add<system>(GET_UTXOS_COST_CYCLES);
+  await management_canister_actor.bitcoin_get_utxos({
+      address;
+      network;
+      filter = null;
+  })
+};
+
+Rust
+rust/basic_bitcoin/src/service/get_utxos.rs
+use crate::BTC_CONTEXT;
+use ic_cdk::{
+    bitcoin_canister::{bitcoin_get_utxos, GetUtxosRequest, GetUtxosResponse},
+    update,
+};
+
+/// Returns the UTXOs of the given Bitcoin address.
+#[update]
+pub async fn get_utxos(address: String) -> GetUtxosResponse {
+    let ctx = BTC_CONTEXT.with(|ctx| ctx.get());
+
+    bitcoin_get_utxos(&GetUtxosRequest {
+        address,
+        network: ctx.network,
+        filter: None,
+    })
+    .await
+    .unwrap()
+}
+
+See full example on GitHub
+Reading current balance
+To read the current balance of a Bitcoin address, make a call to the bitcoin_get_balance Bitcoin API method.
+
+Motoko
+motoko/basic_bitcoin/src/basic_bitcoin/src/BitcoinApi.mo
+/// Returns the balance of the given Bitcoin address.
+///
+/// Relies on the `bitcoin_get_balance` endpoint.
+/// See https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-bitcoin_get_balance
+public func get_balance(network : Network, address : BitcoinAddress) : async Satoshi {
+  ExperimentalCycles.add<system>(GET_BALANCE_COST_CYCLES);
+  await management_canister_actor.bitcoin_get_balance({
+      address;
+      network;
+      min_confirmations = null;
+  })
+};
+
+Rust
+rust/basic_bitcoin/src/service/get_balance.rs
+use crate::BTC_CONTEXT;
+use ic_cdk::{
+    bitcoin_canister::{bitcoin_get_balance, GetBalanceRequest},
+    update,
+};
+
+/// Returns the balance of the given bitcoin address.
+#[update]
+pub async fn get_balance(address: String) -> u64 {
+    let ctx = BTC_CONTEXT.with(|ctx| ctx.get());
+
+    bitcoin_get_balance(&GetBalanceRequest {
+        address,
+        network: ctx.network,
+        min_confirmations: None,
+    })
+    .await
+    .unwrap()
+}
+
+Rust
+rust/basic_bitcoin/src/service/get_current_fee_percentiles.rs
+use crate::BTC_CONTEXT;
+use ic_cdk::{
+    bitcoin_canister::{
+        bitcoin_get_current_fee_percentiles, GetCurrentFeePercentilesRequest, MillisatoshiPerByte,
+    },
+    update,
+};
+
+/// Returns the 100 fee percentiles measured in millisatoshi/byte.
+/// Percentiles are computed from the last 10,000 transactions (if available).
+#[update]
+pub async fn get_current_fee_percentiles() -> Vec<MillisatoshiPerByte> {
+    let ctx = BTC_CONTEXT.with(|ctx| ctx.get());
+
+    bitcoin_get_current_fee_percentiles(&GetCurrentFeePercentilesRequest {
+        network: ctx.network,
+    })
+    .await
+    .unwrap()
+}
+
+See full example on GitHub
+Reading the fee percentile
+The transaction fees on the Bitcoin network change dynamically based on the number of pending transactions. In order to get fee percentiles of the last 10_000 transactions mined into blocks, call bitcoin_get_current_fee_percentiles.
+
+The function returns 101 numbers that are fees measured in millisatoshi per virtual byte. The i-th element of the result corresponds to the i-th percentile fee. For example, to get the median fee over the last few blocks, look at the 50-th element of the result.
+
+Motoko
+Rust
+motoko/basic_bitcoin/src/basic_bitcoin/src/BitcoinApi.mo
+/// Returns the 100 fee percentiles measured in millisatoshi/vbyte.
+/// Percentiles are computed from the last 10,000 transactions (if available).
+///
+/// Relies on the `bitcoin_get_current_fee_percentiles` endpoint.
+/// See https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-bitcoin_get_current_fee_percentiles
+public func get_current_fee_percentiles(network : Network) : async [MillisatoshiPerVByte] {
+  ExperimentalCycles.add<system>(GET_CURRENT_FEE_PERCENTILES_COST_CYCLES);
+  await management_canister_actor.bitcoin_get_current_fee_percentiles({
+      network;
+  })
+};
+
+See full example on GitHub
+Reading the block headers
+To read the block headers within a provided range of start and end heights, make a call to the bitcoin_get_block_headers Bitcoin API method
+
+rust/basic_bitcoin/src/service/get_block_headers.rs
+use crate::BTC_CONTEXT;
+use ic_cdk::{
+    bitcoin_canister::{
+        bitcoin_get_block_headers, GetBlockHeadersRequest, GetBlockHeadersResponse,
+    },
+    update,
+};
+
+/// Returns the block headers in the given height range.
+#[update]
+pub async fn get_block_headers(
+    start_height: u32,
+    end_height: Option<u32>,
+) -> GetBlockHeadersResponse {
+    let ctx = BTC_CONTEXT.with(|ctx| ctx.get());
+
+    bitcoin_get_block_headers(&GetBlockHeadersRequest {
+        start_height,
+        end_height,
+        network: ctx.network,
+    })
+    .await
+    .unwrap()
+}

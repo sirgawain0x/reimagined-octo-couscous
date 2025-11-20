@@ -26,6 +26,16 @@
       "type": "motoko",
       "main": "src/canisters/swap/main.mo",
       "candid": "src/canisters/swap/swap.did"
+    },
+    "sol_rpc": {
+      "type": "custom",
+      "candid": "https://github.com/dfinity/sol-rpc-canister/releases/latest/download/sol_rpc_canister.did",
+      "wasm": "https://github.com/dfinity/sol-rpc-canister/releases/latest/download/sol_rpc_canister.wasm.gz",
+      "remote": {
+        "id": {
+          "ic": "tghme-zyaaa-aaaar-qarca-cai"
+        }
+      }
     }
   },
   "defaults": {
