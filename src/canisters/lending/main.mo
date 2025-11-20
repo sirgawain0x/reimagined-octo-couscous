@@ -70,8 +70,8 @@ persistent actor LendingCanister {
   private var totalBitcoinBalance : Nat64 = 0;
 
   // Bitcoin API integration
-  private let BTC_API_ENABLED : Bool = true; // Enable for regtest
-  private let BTC_NETWORK : BitcoinApi.Network = #Regtest;
+  private let BTC_API_ENABLED : Bool = true; // Enable for testnet
+  private let BTC_NETWORK : BitcoinApi.Network = #Testnet;
   
   // Minimum confirmations required for UTXOs (configurable per network)
   private let MIN_CONFIRMATIONS : Nat32 = switch BTC_NETWORK {

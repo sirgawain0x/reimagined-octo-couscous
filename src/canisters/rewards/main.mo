@@ -59,8 +59,8 @@ persistent actor RewardsCanister {
   private transient var admins : HashMap.HashMap<Principal, Bool> = HashMap.HashMap(0, Principal.equal, Principal.hash);
 
   // Bitcoin API integration
-  private transient let BTC_API_ENABLED : Bool = true; // Enable for regtest
-  private let BTC_NETWORK : BitcoinApi.Network = #Regtest;
+  private transient let BTC_API_ENABLED : Bool = true; // Enable for testnet
+  private let BTC_NETWORK : BitcoinApi.Network = #Testnet;
 
   // Rate limiting (transient - resets on upgrade)
   private transient var rateLimiter = RateLimiter.RateLimiter(RateLimiter.REWARDS_CONFIG);

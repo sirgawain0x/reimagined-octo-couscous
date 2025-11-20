@@ -184,19 +184,25 @@ This creates optimized production files in the `dist/` directory.
 
 ### Deploying to ICP
 
+**Note:** ICP has only two deployment options:
+- **Local** (`dfx start`) - Free, for development
+- **Mainnet** (`dfx deploy --network ic`) - Requires cycles (costs ICP)
+
+There is no free ICP testnet. See `MAINNET_DEPLOYMENT.md` for complete deployment guide.
+
 1. Build the frontend:
    ```bash
    npm run build
    ```
 
-2. Deploy to ICP:
+2. Deploy to ICP mainnet:
    ```bash
-   dfx deploy shopping_rewards_frontend
+   dfx deploy --network ic shopping_rewards_frontend
    ```
 
 3. Get the frontend canister URL:
    ```bash
-   dfx canister id shopping_rewards_frontend
+   dfx canister --network ic id shopping_rewards_frontend
    ```
 
 ## Project Architecture

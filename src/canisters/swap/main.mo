@@ -36,8 +36,8 @@ persistent actor SwapCanister {
   // ckBTC Minter: nfvlz-3qaaa-aaaar-qaanq-cai
   
   // Network configuration (should be set from environment or canister argument)
-  // For now, defaulting to mainnet - should be configurable
-  private let USE_TESTNET : Bool = false; // TODO: Make this configurable via canister argument or environment
+  // Set to true for testnet deployment, false for mainnet
+  private let USE_TESTNET : Bool = true; // Set to true for testnet deployment
   
   // ckBTC canister ID strings (deferred to avoid initialization errors on local network)
   // We'll parse these lazily when needed to avoid errors during canister installation

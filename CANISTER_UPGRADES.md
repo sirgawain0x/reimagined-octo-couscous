@@ -132,14 +132,20 @@ npm test
 npx playwright test
 ```
 
-### Testnet Testing
+### Testing Before Production
+
+**Note:** ICP has no free testnet. The `--network ic` option deploys to mainnet, which requires cycles.
+
+For testing, you can:
+1. Test locally first: `dfx deploy` (local network, free)
+2. Deploy to mainnet with Bitcoin testnet: Use Bitcoin testnet and ckBTC testnet services even when deployed to ICP mainnet
+3. See `TESTNET_DEPLOYMENT.md` for configuring Bitcoin/ckBTC testnet
 
 ```bash
-# Deploy to testnet
+# Deploy to mainnet (requires cycles)
 dfx deploy --network ic --wallet <wallet-id>
 
-# Test on testnet
-# Use testnet canister IDs in .env
+# Use mainnet canister IDs in .env
 ```
 
 ## Breaking Changes
@@ -192,13 +198,15 @@ If canister becomes unresponsive:
 
 ## Best Practices
 
-1. **Always test locally first**
-2. **Deploy to testnet before mainnet**
+1. **Always test locally first** - Use `dfx deploy` (local network, free)
+2. **Test with Bitcoin testnet** - Deploy to ICP mainnet but use Bitcoin testnet for testing (see `TESTNET_DEPLOYMENT.md`)
 3. **Have rollback plan ready**
 4. **Monitor after upgrade**
 5. **Document all changes**
 6. **Coordinate with team**
 7. **Backup critical data**
+
+**Note:** ICP has no free testnet. For testing, use local development or deploy to mainnet with Bitcoin testnet configuration.
 
 ## Notes
 
