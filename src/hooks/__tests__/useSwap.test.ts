@@ -8,11 +8,14 @@ vi.mock('@/services/canisters')
 vi.mock('@/utils/logger')
 vi.mock('@/utils/retry')
 vi.mock('@/utils/rateLimiter')
+const mockUseICP = vi.fn(() => ({
+  principal: createMockPrincipal(),
+  isConnected: true,
+  isLoading: false,
+}))
+
 vi.mock('./useICP', () => ({
-  useICP: () => ({
-    principal: createMockPrincipal(),
-    isConnected: true,
-  }),
+  useICP: () => mockUseICP(),
 }))
 
 describe('useSwap', () => {
@@ -73,7 +76,7 @@ describe('useSwap', () => {
     expect(quote).toEqual(mockQuote.ok)
   })
 
-  it('should handle swap successfully', async () => {
+  it('should handle executeSwap successfully', async () => {
     const mockSwapResult = {
       ok: {
         txIndex: BigInt(1),
@@ -82,6 +85,7 @@ describe('useSwap', () => {
       },
     }
     mockActor.swap.mockResolvedValue(mockSwapResult)
+    mockActor.getPools.mockResolvedValue([])
 
     const { result } = renderHook(() => useSwap())
 
@@ -89,7 +93,7 @@ describe('useSwap', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    await result.current.swap('pool1', { ckBTC: null }, 1000, 1800)
+    const swapResult = await result.current.executeSwap('pool1', 'ckBTC', BigInt(1000), BigInt(1800))
 
     expect(mockActor.swap).toHaveBeenCalledWith(
       'pool1',
@@ -97,10 +101,11 @@ describe('useSwap', () => {
       BigInt(1000),
       BigInt(1800)
     )
-    expect(result.current.error).toBeNull()
+    expect(swapResult.success).toBe(true)
+    expect(swapResult.txIndex).toBe(BigInt(1))
   })
 
-  it('should handle swap errors', async () => {
+  it('should handle executeSwap errors', async () => {
     const errorMessage = 'Insufficient liquidity'
     mockActor.swap.mockResolvedValue({ err: errorMessage })
 
@@ -110,14 +115,30 @@ describe('useSwap', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    await result.current.swap('pool1', { ckBTC: null }, 1000, 1800)
+    const swapResult = await result.current.executeSwap('pool1', 'ckBTC', BigInt(1000), BigInt(1800))
 
-    expect(result.current.error).toBe(errorMessage)
+    expect(swapResult.success).toBe(false)
   })
 
-  it('should get ckBTC balance', async () => {
-    const mockBalance = BigInt(1000000)
-    mockActor.getCKBTCBalance.mockResolvedValue(mockBalance)
+  it('should validate swap amount', async () => {
+    const { result } = renderHook(() => useSwap())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    const swapResult = await result.current.executeSwap('pool1', 'ckBTC', BigInt(0), BigInt(1800))
+
+    expect(swapResult.success).toBe(false)
+    expect(mockActor.swap).not.toHaveBeenCalled()
+  })
+
+  it('should require authentication for executeSwap', async () => {
+    mockUseICP.mockReturnValueOnce({
+      principal: null,
+      isConnected: false,
+      isLoading: false,
+    } as any)
 
     const { result } = renderHook(() => useSwap())
 
@@ -125,15 +146,25 @@ describe('useSwap', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    const balance = await result.current.getCKBTCBalance()
+    const swapResult = await result.current.executeSwap('pool1', 'ckBTC', BigInt(1000), BigInt(1800))
 
-    expect(mockActor.getCKBTCBalance).toHaveBeenCalled()
-    expect(balance).toBe(mockBalance)
+    expect(swapResult.success).toBe(false)
+    expect(mockActor.swap).not.toHaveBeenCalled()
   })
 
-  it('should get BTC address', async () => {
-    const mockAddress = 'bc1qtest123'
-    mockActor.getBTCAddress.mockResolvedValue(mockAddress)
+  it('should handle getSwapHistory', async () => {
+    const mockHistory = [
+      {
+        id: BigInt(1),
+        user: createMockPrincipal(),
+        tokenIn: { ckBTC: null },
+        tokenOut: { ICP: null },
+        amountIn: BigInt(1000),
+        amountOut: BigInt(1900),
+        timestamp: BigInt(Date.now()),
+      },
+    ]
+    mockActor.getSwapHistory.mockResolvedValue(mockHistory)
 
     const { result } = renderHook(() => useSwap())
 
@@ -141,10 +172,58 @@ describe('useSwap', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    const address = await result.current.getBTCAddress()
+    const history = await result.current.getSwapHistory()
 
-    expect(mockActor.getBTCAddress).toHaveBeenCalled()
-    expect(address).toBe(mockAddress)
+    expect(mockActor.getSwapHistory).toHaveBeenCalled()
+    expect(history.length).toBe(1)
+    expect(history[0].tokenIn).toBe('ckBTC')
+    expect(history[0].tokenOut).toBe('ICP')
+  })
+
+  it('should return empty history when not connected', async () => {
+    mockUseICP.mockReturnValueOnce({
+      principal: null,
+      isConnected: false,
+      isLoading: false,
+    } as any)
+
+    const { result } = renderHook(() => useSwap())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    const history = await result.current.getSwapHistory()
+
+    expect(history).toEqual([])
+    expect(mockActor.getSwapHistory).not.toHaveBeenCalled()
+  })
+
+  it('should handle quote with zero amount', async () => {
+    const { result } = renderHook(() => useSwap())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    const quote = await result.current.getQuote('pool1', BigInt(0))
+
+    expect(quote).toBeNull()
+    expect(mockActor.getQuote).not.toHaveBeenCalled()
+  })
+
+  it('should handle refresh', async () => {
+    mockActor.getPools.mockResolvedValue([])
+
+    const { result } = renderHook(() => useSwap())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    await result.current.refresh()
+
+    expect(mockActor.getPools).toHaveBeenCalledTimes(2) // Initial + refresh
   })
 })
 

@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import type { Store } from "@/types"
-import { createRewardsActor, requireAuth } from "@/services/canisters"
+import { createRewardsActor } from "@/services/canisters"
 import { logError, logWarn } from "@/utils/logger"
-import { Principal } from "@dfinity/principal"
 import { useICP } from "./useICP"
 import { retry, retryWithTimeout } from "@/utils/retry"
 import { checkRateLimit } from "@/utils/rateLimiter"
@@ -132,17 +131,17 @@ export function useRewards() {
       )
       
       // Handle Result variant from canister
-      if ("ok" in result) {
+      if ("ok" in result && result.ok) {
         const reward = Number(result.ok.rewardEarned) / 1e8 // Convert back from nat64
         return { success: true, reward }
-      } else if ("err" in result) {
-        logError("Canister returned error", new Error(result.err), { storeId, amount })
+      } else if ("err" in result && result.err) {
+        logError("Canister returned error", new Error(result.err), { storeId: String(storeId), amount: String(amount) })
         return { success: false, reward: 0, error: result.err }
       }
       
       return { success: false, reward: 0, error: "Unexpected response from canister" }
     } catch (error) {
-      logError("Error tracking purchase", error as Error, { storeId, amount })
+      logError("Error tracking purchase", error as Error, { storeId: String(storeId), amount: String(amount) })
       return { success: false, reward: 0, error: (error as Error).message || "Failed to track purchase" }
     }
   }

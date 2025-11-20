@@ -102,6 +102,7 @@ module CKBTC {
   };
 
   /// Get ckBTC balance for an account
+  /// Retries on temporary failures (caller should implement retry logic if needed)
   public func getBalance(
     ledger : CKBTC_LEDGER,
     account : Account
@@ -110,7 +111,7 @@ module CKBTC {
       let balance = await ledger.icrc1_balance_of(account);
       #ok(balance)
     } catch (_) {
-      #err("Failed to get ckBTC balance")
+      #err("Failed to get ckBTC balance. Network error or canister unavailable.")
     }
   };
 
@@ -165,6 +166,8 @@ module CKBTC {
   };
 
   /// Update ckBTC balance (check for new deposits)
+  /// This function should be retried on TemporarilyUnavailable errors
+  /// Caller should implement retry logic with exponential backoff
   public func updateBalance(
     minter : CKBTC_MINTER,
     owner : Principal
@@ -175,7 +178,10 @@ module CKBTC {
         case (#ok(mintTx)) #ok(mintTx);
         case (#err(err)) {
           let errorMsg = switch err {
-            case (#TemporarilyUnavailable({ error_message; error_code = _ })) "Temporarily unavailable: " # error_message;
+            case (#TemporarilyUnavailable({ error_message; error_code = _ })) {
+              // This error is retryable - caller should retry with backoff
+              "Temporarily unavailable: " # error_message # ". Please retry."
+            };
             case (#MalformedAddress) "Malformed Bitcoin address";
             case (#InsufficientFunds({ balance })) "Insufficient funds. Balance: " # Nat.toText(balance);
             case (#AmountTooLow({ min_withdrawal_amount })) "Amount too low. Min: " # Nat.toText(min_withdrawal_amount);
@@ -185,11 +191,13 @@ module CKBTC {
         }
       }
     } catch (_) {
-      #err("Failed to update ckBTC balance")
+      #err("Failed to update ckBTC balance. Network error or canister unavailable.")
     }
   };
 
   /// Retrieve ckBTC as BTC (withdraw)
+  /// This function should be retried on TemporarilyUnavailable errors
+  /// Caller should implement retry logic with exponential backoff
   public func retrieveBTC(
     minter : CKBTC_MINTER,
     address : Text,
@@ -206,7 +214,10 @@ module CKBTC {
         case (#ok(blockIndex)) #ok(blockIndex);
         case (#err(err)) {
           let errorMsg = switch err {
-            case (#TemporarilyUnavailable({ error_message; error_code = _ })) "Temporarily unavailable: " # error_message;
+            case (#TemporarilyUnavailable({ error_message; error_code = _ })) {
+              // This error is retryable - caller should retry with backoff
+              "Temporarily unavailable: " # error_message # ". Please retry."
+            };
             case (#MalformedAddress) "Malformed Bitcoin address";
             case (#InsufficientFunds({ balance })) "Insufficient funds. Balance: " # Nat.toText(balance);
             case (#AmountTooLow({ min_withdrawal_amount })) "Amount too low. Min: " # Nat.toText(min_withdrawal_amount);
@@ -216,7 +227,7 @@ module CKBTC {
         }
       }
     } catch (_) {
-      #err("Failed to retrieve BTC")
+      #err("Failed to retrieve BTC. Network error or canister unavailable.")
     }
   };
 };

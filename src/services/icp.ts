@@ -68,7 +68,7 @@ export async function createAuthClient(): Promise<AuthClient> {
         logWarn("Internet Identity canister ID is incorrect. This is expected if you're using Bitcoin wallet authentication.")
         throw new Error("Internet Identity not available. Use Bitcoin wallet authentication instead.")
       }
-      logWarn("Failed to create AuthClient (this is ok if using Bitcoin wallet)", error as Error)
+      logWarn("Failed to create AuthClient (this is ok if using Bitcoin wallet)", { error: String(error) })
       throw error
     }
   }
@@ -182,7 +182,7 @@ export async function loginWithBitcoinWallet(provider: string): Promise<Principa
       const siwbModule = await import("ic-use-siwb-identity")
       
       // Try to use the SIWB package's connection method
-      if (siwbModule.useSiwbIdentity) {
+      if (typeof siwbModule.useSiwbIdentity === "function") {
         const connectFn = (siwbModule as any).connect || (siwbModule as any).loginWithBitcoin
         
         if (connectFn && typeof connectFn === "function") {
@@ -206,7 +206,7 @@ export async function loginWithBitcoinWallet(provider: string): Promise<Principa
         identity = await (siwbModule as any).connect(provider)
       }
     } catch (siwbError) {
-      logWarn("SIWB package connection failed, using direct wallet connection", siwbError as Error)
+      logWarn("SIWB package connection failed, using direct wallet connection", { error: String(siwbError) })
     }
     
     // Fallback to direct wallet connection if SIWB package didn't work
@@ -250,15 +250,15 @@ export async function loginWithBitcoinWallet(provider: string): Promise<Principa
             
             // Handle different response formats
             if (Array.isArray(result)) {
-              logInfo("Wizz wallet returned array:", result)
+              logInfo("Wizz wallet returned array:", { result: JSON.stringify(result) })
               return result[0] || result
             }
             if (result?.accounts && Array.isArray(result.accounts)) {
-              logInfo("Wizz wallet returned object with accounts:", result.accounts)
+              logInfo("Wizz wallet returned object with accounts:", { accounts: JSON.stringify(result.accounts) })
               return result.accounts[0] || result
             }
             
-            logInfo("Wizz wallet raw result:", result)
+            logInfo("Wizz wallet raw result:", { result: JSON.stringify(result) })
             return result
           } catch (error: any) {
             if (error.code === 4001 || error.message?.includes("reject") || error.message?.includes("denied")) {
@@ -369,31 +369,31 @@ export async function loginWithBitcoinWallet(provider: string): Promise<Principa
       
       if (typeof walletAccount === "string") {
         bitcoinAddress = walletAccount
-        logInfo("Extracted address from string:", bitcoinAddress)
+        logInfo("Extracted address from string:", { address: bitcoinAddress })
       } else if (Array.isArray(walletAccount) && walletAccount.length > 0) {
         bitcoinAddress = walletAccount[0]
-        logInfo("Extracted address from array:", bitcoinAddress)
+        logInfo("Extracted address from array:", { address: bitcoinAddress })
       } else if (walletAccount?.address) {
         bitcoinAddress = walletAccount.address
-        logInfo("Extracted address from address field:", bitcoinAddress)
+        logInfo("Extracted address from address field:", { address: bitcoinAddress })
       } else if (walletAccount?.accounts && Array.isArray(walletAccount.accounts)) {
         bitcoinAddress = walletAccount.accounts[0]
-        logInfo("Extracted address from accounts array:", bitcoinAddress)
+        logInfo("Extracted address from accounts array:", { address: bitcoinAddress })
       }
       
       if (!bitcoinAddress) {
-        logError("Could not extract Bitcoin address", new Error(`Wallet account format: ${JSON.stringify(walletAccount)}`))
+        logError("Could not extract Bitcoin address", new Error(`Wallet account format: ${JSON.stringify(walletAccount)}`), { walletAccount: JSON.stringify(walletAccount) })
         throw new Error("Could not extract Bitcoin address from wallet. Wallet returned: " + JSON.stringify(walletAccount))
       }
       
-      logInfo("Successfully extracted Bitcoin address:", bitcoinAddress)
+      logInfo("Successfully extracted Bitcoin address:", { address: bitcoinAddress })
       
       // Try to create identity using SIWB canister flow
       // This requires: 1) Get SIWB message from canister, 2) Sign with wallet, 3) Get delegation
       try {
         // Import SIWB utilities
-        const { DelegationIdentity } = await import("@dfinity/identity")
-        const siwbModule = await import("ic-use-siwb-identity")
+        await import("@dfinity/identity")
+        await import("ic-use-siwb-identity")
         
         // Try to use the SIWB provider canister to get a message and create identity
         // For now, we'll create a simple deterministic principal from the address
@@ -432,7 +432,7 @@ export async function loginWithBitcoinWallet(provider: string): Promise<Principa
         // Using simplified identity from Bitcoin address - this works for authentication
         // Full SIWB delegation would require canister integration but isn't needed for basic auth
       } catch (siwbError: any) {
-        logError("Could not create identity from wallet", siwbError as Error)
+        logError("Could not create identity from wallet", siwbError as Error, { provider, error: String(siwbError) })
         // Provide more specific error message
         const errorMessage = siwbError?.message || "Unknown error"
         throw new Error(`Failed to create identity from Bitcoin wallet: ${errorMessage}. Please ensure your wallet is unlocked and try again.`)
@@ -469,7 +469,7 @@ export async function loginWithBitcoinWallet(provider: string): Promise<Principa
   }
 }
 
-export async function setBitcoinIdentity(principal: Principal): Promise<void> {
+export async function setBitcoinIdentity(_principal: Principal): Promise<void> {
   // This function is called after successful wallet connection
   // The identity should already be stored in siwbIdentity during loginWithBitcoinWallet
   if (!siwbIdentity) {
@@ -583,7 +583,7 @@ export async function getIdentity(): Promise<Principal | null> {
       // Internet Identity might not be configured - that's ok if using Bitcoin wallet
       // Don't log warnings if it's just not configured (silent fail)
       if (error instanceof Error && !error.message.includes("canister id incorrect")) {
-        logWarn("Could not check Internet Identity (this is ok if using Bitcoin wallet)", error as Error)
+        logWarn("Could not check Internet Identity (this is ok if using Bitcoin wallet)", { error: error.message })
       }
     }
   }

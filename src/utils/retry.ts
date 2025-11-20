@@ -3,7 +3,7 @@
  * Handles transient errors and provides configurable retry logic
  */
 
-import { logError, logWarn } from './logger'
+import { logWarn } from './logger'
 
 export interface RetryOptions {
   maxRetries?: number

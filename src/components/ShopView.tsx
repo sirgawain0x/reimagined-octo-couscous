@@ -22,7 +22,7 @@ function ShopView() {
 
   return (
     <div className="animate-fade-in">
-      <h1 className="text-4xl font-extrabold text-white mb-4">Shop at your favorite stores.</h1>
+      <h1 className="text-4xl font-extrabold text-white mb-4">Shop At Your Favorite Stores</h1>
       <h2 className="text-2xl font-light text-yellow-400 mb-8">Earn Bitcoin rewards on every purchase.</h2>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">

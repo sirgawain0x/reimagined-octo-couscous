@@ -308,7 +308,7 @@ module Runestone {
   public func encodeEtchingRunestone(
     runeName : Text,
     divisibility : Nat8,
-    symbol : ?Text,
+    _symbol : ?Text,
     premine : ?Nat64
   ) : Result<[Nat8], Text> {
     // Encode rune name

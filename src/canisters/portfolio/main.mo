@@ -109,7 +109,19 @@ persistent actor PortfolioCanister {
   };
 
   /// Get user's complete portfolio
-  public func getPortfolio(userId : Principal) : async Portfolio {
+  public shared (msg) func getPortfolio(userId : Principal) : async Portfolio {
+    let caller = msg.caller;
+    
+    // Security: Only allow users to query their own portfolio
+    if (not Principal.equal(caller, userId)) {
+      return {
+        totalValue = 0.0;
+        totalRewards = 0;
+        totalLended = 0.0;
+        assets = [];
+      }
+    };
+    
     // Input validation
     if (not InputValidation.validatePrincipal(userId)) {
       // Return empty portfolio for invalid principal
@@ -195,7 +207,14 @@ persistent actor PortfolioCanister {
   };
 
   /// Get balance for specific asset
-  public func getBalance(userId : Principal, asset : Text) : async Nat64 {
+  public shared (msg) func getBalance(userId : Principal, asset : Text) : async Nat64 {
+    let caller = msg.caller;
+    
+    // Security: Only allow users to query their own balance
+    if (not Principal.equal(caller, userId)) {
+      return 0
+    };
+    
     // Input validation
     if (not InputValidation.validatePrincipal(userId)) {
       return 0
@@ -227,7 +246,7 @@ persistent actor PortfolioCanister {
   };
 
   /// Get total USD value of portfolio
-  public func getTotalValue(userId : Principal) : async Float {
+  public shared (msg) func getTotalValue(userId : Principal) : async Float {
     let portfolio = await getPortfolio(userId);
     portfolio.totalValue
   };

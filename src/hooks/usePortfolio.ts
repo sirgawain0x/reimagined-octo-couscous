@@ -5,6 +5,8 @@ import { logError } from "@/utils/logger"
 import { useICP } from "./useICP"
 import { retry, retryWithTimeout } from "@/utils/retry"
 
+// Mock portfolio data (unused but kept for reference)
+/*
 const mockPortfolio: Portfolio = {
   totalValue: 12450.75,
   totalRewards: 0.0125,
@@ -15,6 +17,7 @@ const mockPortfolio: Portfolio = {
     { name: "Solana", symbol: "SOL", amount: 10.0, value: 450.0 },
   ],
 }
+*/
 
 export function usePortfolio() {
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)

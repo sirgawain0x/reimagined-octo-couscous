@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import type { ChainKeyToken, SwapPool, SwapQuote, SwapRecord } from "@/types"
-import { createSwapActor, requireAuth } from "@/services/canisters"
+import { createSwapActor } from "@/services/canisters"
 import { logError } from "@/utils/logger"
 import { useICP } from "./useICP"
 import { retry, retryWithTimeout } from "@/utils/retry"
@@ -34,7 +34,7 @@ export function useSwap() {
   const [pools, setPools] = useState<SwapPool[]>([])
   const [quote, setQuote] = useState<SwapQuote | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [_error, setError] = useState<string | null>(null)
   const { principal, isConnected } = useICP()
 
   useEffect(() => {
@@ -59,15 +59,18 @@ export function useSwap() {
       
       // Convert canister pools to frontend format
       // ChainKeyToken variants come as objects like { ckBTC: null }, { ckETH: null }, { ckSOL: null }, { ICP: null }
-      const formattedPools: SwapPool[] = canisterPools.map((pool, index) => {
+      const formattedPools: SwapPool[] = canisterPools.map((pool) => {
         // Extract token names from variant objects
-        const tokenAName = "ckBTC" in pool.tokenA ? "ckBTC" 
-          : "ckETH" in pool.tokenA ? "ckETH" 
-          : "SOL" in pool.tokenA ? "SOL" 
+        // Type assertion needed because TypeScript sees ChainKeyToken as string, but it's actually a variant object
+        const tokenA = pool.tokenA as unknown as Record<string, unknown>
+        const tokenB = pool.tokenB as unknown as Record<string, unknown>
+        const tokenAName = "ckBTC" in tokenA ? "ckBTC" 
+          : "ckETH" in tokenA ? "ckETH" 
+          : "SOL" in tokenA ? "SOL" 
           : "ICP"
-        const tokenBName = "ckBTC" in pool.tokenB ? "ckBTC" 
-          : "ckETH" in pool.tokenB ? "ckETH" 
-          : "SOL" in pool.tokenB ? "SOL" 
+        const tokenBName = "ckBTC" in tokenB ? "ckBTC" 
+          : "ckETH" in tokenB ? "ckETH" 
+          : "SOL" in tokenB ? "SOL" 
           : "ICP"
         const poolId = `${tokenAName}_${tokenBName}`
         return {
@@ -107,7 +110,7 @@ export function useSwap() {
         { maxRetries: 3, initialDelayMs: 1000 }
       )
       
-      if ("ok" in result) {
+      if ("ok" in result && result.ok) {
         const quote: SwapQuote = {
           amountOut: result.ok.amountOut,
           priceImpact: result.ok.priceImpact,
@@ -120,7 +123,7 @@ export function useSwap() {
         return null
       }
     } catch (error) {
-      logError("Error getting quote", error as Error, { poolId, amountIn })
+      logError("Error getting quote", error as Error, { poolId, amountIn: String(amountIn) })
       return null
     }
   }
@@ -152,7 +155,9 @@ export function useSwap() {
       )
       
       // Convert ChainKeyToken string to variant
-      let tokenInVariant: any
+      // The canister expects a variant object like { ckBTC: null }
+      type ChainKeyTokenVariant = { ckBTC: null } | { ckETH: null } | { SOL: null } | { ICP: null }
+      let tokenInVariant: ChainKeyTokenVariant
       if (tokenIn === "ckBTC") {
         tokenInVariant = { ckBTC: null }
       } else if (tokenIn === "ckETH") {
@@ -164,22 +169,22 @@ export function useSwap() {
       }
       
       const result = await retryWithTimeout(
-        () => canister.swap(poolId, tokenInVariant, amountIn, minAmountOut),
+        () => canister.swap(poolId, tokenInVariant as any, amountIn, minAmountOut),
         30000, // 30 second timeout for swap operations
         { maxRetries: 3, initialDelayMs: 1000 }
       )
       
-      if ("ok" in result) {
+      if ("ok" in result && result.ok) {
         await loadPools() // Refresh pools
         return { success: true, txIndex: BigInt(result.ok.txIndex) }
-      } else if ("err" in result) {
-        logError("Canister returned error", new Error(result.err), { poolId, tokenIn, amountIn })
+      } else if ("err" in result && result.err) {
+        logError("Canister returned error", new Error(result.err), { poolId, tokenIn: String(tokenIn), amountIn: String(amountIn) })
         return { success: false }
       }
       
       return { success: false }
     } catch (error) {
-      logError("Error executing swap", error as Error, { poolId, tokenIn, amountIn })
+      logError("Error executing swap", error as Error, { poolId, tokenIn: String(tokenIn), amountIn: String(amountIn) })
       return { success: false }
     }
   }
@@ -202,13 +207,16 @@ export function useSwap() {
       )
       
       return history.map((swap) => {
-        const tokenInName = "ckBTC" in swap.tokenIn ? "ckBTC" 
-          : "ckETH" in swap.tokenIn ? "ckETH" 
-          : "SOL" in swap.tokenIn ? "SOL" 
+        // Type assertion needed because TypeScript sees ChainKeyToken as string, but it's actually a variant object
+        const tokenIn = swap.tokenIn as unknown as Record<string, unknown>
+        const tokenOut = swap.tokenOut as unknown as Record<string, unknown>
+        const tokenInName = "ckBTC" in tokenIn ? "ckBTC" 
+          : "ckETH" in tokenIn ? "ckETH" 
+          : "SOL" in tokenIn ? "SOL" 
           : "ICP"
-        const tokenOutName = "ckBTC" in swap.tokenOut ? "ckBTC" 
-          : "ckETH" in swap.tokenOut ? "ckETH" 
-          : "SOL" in swap.tokenOut ? "SOL" 
+        const tokenOutName = "ckBTC" in tokenOut ? "ckBTC" 
+          : "ckETH" in tokenOut ? "ckETH" 
+          : "SOL" in tokenOut ? "SOL" 
           : "ICP"
         return {
           id: swap.id,

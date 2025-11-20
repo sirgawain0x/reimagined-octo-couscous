@@ -104,7 +104,7 @@ dfx deploy ic_siwb_provider --argument $'(
     salt = "123456";
     network = opt "testnet";
     scheme = opt "http";
-    statement = opt "Login to ICP Rewards Platform";
+    statement = opt "Login to BitRewards Platform";
     sign_in_expires_in = opt 1500000000000;
     session_expires_in = opt 604800000000000;
     targets = null;

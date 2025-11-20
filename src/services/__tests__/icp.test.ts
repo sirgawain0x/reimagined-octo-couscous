@@ -120,7 +120,8 @@ describe('ICP service', () => {
       } as any
 
       vi.mocked(HttpAgent).mockImplementation(() => mockAgent)
-      vi.mocked(Actor.createActor).mockReturnValue({} as any)
+      const Actor = await import('@dfinity/agent')
+      vi.spyOn(Actor, 'Actor').mockReturnValue({} as any)
 
       const actor = await createActor(
         () => ({} as any),
@@ -129,6 +130,77 @@ describe('ICP service', () => {
       )
 
       expect(actor).toBeDefined()
+    })
+
+    it('should create actor with anonymous identity when allowAnonymous is true', async () => {
+      const mockAgent = {
+        fetchRootKey: vi.fn().mockResolvedValue(undefined),
+      } as any
+
+      vi.mocked(HttpAgent).mockImplementation(() => mockAgent)
+      const Actor = await import('@dfinity/agent')
+      vi.spyOn(Actor, 'Actor').mockReturnValue({} as any)
+
+      const actor = await createActor(
+        () => ({} as any),
+        Principal.fromText('test-canister-id'),
+        null,
+        true
+      )
+
+      expect(actor).toBeDefined()
+    })
+  })
+
+  describe('login', () => {
+    it('should login successfully', async () => {
+      const mockPrincipal = createMockPrincipal()
+      const mockIdentity = {
+        getPrincipal: vi.fn().mockReturnValue(mockPrincipal),
+      }
+
+      const mockAuthClient = {
+        isAuthenticated: vi.fn().mockResolvedValue(true),
+        getIdentity: vi.fn().mockReturnValue(mockIdentity),
+        login: vi.fn((options) => {
+          options.onSuccess()
+        }),
+      }
+
+      vi.mocked(AuthClient.create).mockResolvedValue(mockAuthClient as any)
+
+      const principal = await login()
+
+      expect(principal).toBe(mockPrincipal)
+    })
+
+    it('should return null if Internet Identity URL not configured', async () => {
+      const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
+      delete process.env.VITE_INTERNET_IDENTITY_URL
+
+      await vi.resetModules()
+      const { login: loginReloaded } = await import('../icp')
+
+      const principal = await loginReloaded()
+
+      expect(principal).toBeNull()
+
+      process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
+    })
+  })
+
+  describe('logout', () => {
+    it('should logout successfully', async () => {
+      const mockAuthClient = {
+        logout: vi.fn(),
+      }
+
+      vi.mocked(AuthClient.create).mockResolvedValue(mockAuthClient as any)
+      await createAuthClient()
+
+      await logout()
+
+      expect(mockAuthClient.logout).toHaveBeenCalled()
     })
   })
 })

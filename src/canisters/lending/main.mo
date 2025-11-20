@@ -6,6 +6,7 @@ import Float "mo:base/Float";
 import HashMap "mo:base/HashMap";
 import Hash "mo:base/Hash";
 import Iter "mo:base/Iter";
+import Nat "mo:base/Nat";
 import Nat8 "mo:base/Nat8";
 import Nat32 "mo:base/Nat32";
 import Nat64 "mo:base/Nat64";
@@ -20,6 +21,8 @@ import BitcoinApi "../shared/BitcoinApi";
 import BitcoinUtils "../shared/BitcoinUtils";
 import RateLimiter "../shared/RateLimiter";
 import InputValidation "../shared/InputValidation";
+import Base58Check "mo:bitcoin/Base58Check";
+import Segwit "mo:bitcoin/Segwit";
 
 persistent actor LendingCanister {
   type LendingAsset = Types.LendingAsset;
@@ -114,6 +117,10 @@ persistent actor LendingCanister {
 
   /// Get current APY for an asset
   public query func getCurrentAPY(asset : Text) : async Float {
+    // Input validation
+    if (not InputValidation.validateText(asset, 1, ?10)) {
+      return 0.0
+    };
     switch (assets.get(asset)) {
       case (?asset) asset.apy;
       case null 0.0
@@ -122,6 +129,10 @@ persistent actor LendingCanister {
 
   /// Get user's deposits
   public query func getUserDeposits(userId : Principal) : async [DepositInfo] {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return []
+    };
     let depositIds = userDeposits.get(userId);
     switch depositIds {
       case null [];
@@ -293,7 +304,10 @@ persistent actor LendingCanister {
     });
 
     if (normalizedAsset == "btc" and BTC_API_ENABLED) {
-      // Validate recipient address
+      // Validate recipient address using both validation methods for consistency
+      if (not InputValidation.validateBitcoinAddress(recipientAddress, BTC_NETWORK)) {
+        return #err("Invalid Bitcoin address format")
+      };
       if (not BitcoinUtilsICP.validateAddress(recipientAddress, BTC_NETWORK)) {
         return #err("Invalid Bitcoin address")
       };
@@ -1128,22 +1142,95 @@ persistent actor LendingCanister {
         j += 1
       };
       
-      // Script length placeholder (will be filled with actual script)
-      // For now, use a simple placeholder
-      txBytes.add(25); // P2PKH script length
-      
-      // Script placeholder (25 bytes for P2PKH: OP_DUP OP_HASH160 20bytes OP_EQUALVERIFY OP_CHECKSIG)
-      txBytes.add(0x76); // OP_DUP
-      txBytes.add(0xA9); // OP_HASH160
-      txBytes.add(0x14); // 20 bytes
-      // 20 bytes of address hash (placeholder - would need to decode address)
-      var k = 0;
-      while (k < 20) {
-        txBytes.add(0);
-        k += 1
+      // Decode address to get script hash
+      // Try SegWit first (P2WPKH, P2TR), then Base58Check (P2PKH, P2SH)
+      let scriptResult = switch (Segwit.decode(address)) {
+        case (#ok((_, witnessProgram))) {
+          // SegWit address - determine type by version and program size
+          if (witnessProgram.version == 0 and witnessProgram.program.size() == 20) {
+            // P2WPKH: OP_0 <20-byte-witness-program>
+            var scriptBuffer = Buffer.Buffer<Nat8>(22);
+            scriptBuffer.add(0x00); // OP_0
+            scriptBuffer.add(0x14); // Push 20 bytes
+            for (byte in witnessProgram.program.vals()) {
+              scriptBuffer.add(byte)
+            };
+            #ok(Buffer.toArray(scriptBuffer))
+          } else if (witnessProgram.version == 1 and witnessProgram.program.size() == 32) {
+            // P2TR: OP_1 <32-byte-x-only-public-key>
+            var scriptBuffer = Buffer.Buffer<Nat8>(34);
+            scriptBuffer.add(0x51); // OP_1
+            scriptBuffer.add(0x20); // Push 32 bytes
+            for (byte in witnessProgram.program.vals()) {
+              scriptBuffer.add(byte)
+            };
+            #ok(Buffer.toArray(scriptBuffer))
+          } else {
+            #err("Unsupported SegWit address type")
+          }
+        };
+        case (#err(_)) {
+          // Not SegWit, try Base58Check (P2PKH or P2SH)
+          switch (Base58Check.decode(address)) {
+            case (?decoded) {
+              // P2PKH: version byte (1 byte) + 20-byte hash
+              // P2SH: version byte (1 byte) + 20-byte hash
+              if (decoded.size() == 21) {
+                // Extract 20-byte hash (skip version byte)
+                var hashBuffer = Buffer.Buffer<Nat8>(20);
+                var i = 1; // Start from index 1 (skip version byte)
+                while (i < decoded.size() and hashBuffer.size() < 20) {
+                  hashBuffer.add(decoded[i]);
+                  i += 1
+                };
+                let hash = Buffer.toArray(hashBuffer);
+                
+                // Determine if P2PKH (version 0x00 or 0x6f) or P2SH (version 0x05 or 0xc4)
+                let version = decoded[0];
+                if (version == 0 or version == 111) {
+                  // P2PKH script: OP_DUP OP_HASH160 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG
+                  var scriptBuffer = Buffer.Buffer<Nat8>(25);
+                  scriptBuffer.add(0x76); // OP_DUP
+                  scriptBuffer.add(0xA9); // OP_HASH160
+                  scriptBuffer.add(0x14); // 20 bytes
+                  for (byte in hash.vals()) {
+                    scriptBuffer.add(byte)
+                  };
+                  scriptBuffer.add(0x88); // OP_EQUALVERIFY
+                  scriptBuffer.add(0xAC); // OP_CHECKSIG
+                  #ok(Buffer.toArray(scriptBuffer))
+                } else if (version == 5 or version == 196) {
+                  // P2SH script: OP_HASH160 <20 bytes> OP_EQUAL
+                  var scriptBuffer = Buffer.Buffer<Nat8>(23);
+                  scriptBuffer.add(0xA9); // OP_HASH160
+                  scriptBuffer.add(0x14); // 20 bytes
+                  for (byte in hash.vals()) {
+                    scriptBuffer.add(byte)
+                  };
+                  scriptBuffer.add(0x87); // OP_EQUAL
+                  #ok(Buffer.toArray(scriptBuffer))
+                } else {
+                  #err("Unsupported address version: " # Nat8.toText(version))
+                }
+              } else {
+                #err("Invalid address format: expected 21 bytes, got " # Nat.toText(decoded.size()))
+              }
+            };
+            case null #err("Failed to decode address: " # address)
+          }
+        }
       };
-      txBytes.add(0x88); // OP_EQUALVERIFY
-      txBytes.add(0xAC) // OP_CHECKSIG
+      
+      switch scriptResult {
+        case (#err(msg)) return #err(msg);
+        case (#ok(script)) {
+          // Add script length and script bytes
+          txBytes.add(Nat8.fromIntWrap(script.size()));
+          for (byte in script.vals()) {
+            txBytes.add(byte)
+          }
+        }
+      }
     };
     
     // Locktime (4 bytes) - 0 for now

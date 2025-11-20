@@ -1,125 +1,88 @@
-# ckBTC Integration Testing Guide
+# ckBTC Integration Tests
 
-## Overview
-This document outlines the testing strategy for ckBTC integration in the swap canister.
+This document outlines the test plan for ckBTC integration validation.
 
 ## Test Environment Setup
 
-### Prerequisites
-1. ckBTC testnet canister IDs (or mainnet for production testing)
-2. Bitcoin testnet node (for deposit/withdrawal testing)
-3. Test Bitcoin address with funds
+1. **Testnet Configuration**:
+   - ckBTC Testnet Ledger: `n5wcd-faaaa-aaaar-qaaea-cai`
+   - ckBTC Testnet Minter: `nfvlz-3qaaa-aaaar-qaanq-cai`
+   - Set `USE_TESTNET = true` in swap canister
 
-### Testnet Canister IDs
-- ckBTC Ledger (testnet): To be configured
-- ckBTC Minter (testnet): To be configured
-
-### Mainnet Canister IDs (Production)
-- ckBTC Ledger: `mxzaz-hqaaa-aaaah-aaada-cai`
-- ckBTC Minter: `mqygn-kiaaa-aaaah-aaaqaa-cai`
+2. **Mainnet Configuration**:
+   - ckBTC Mainnet Ledger: `mxzaz-hqaaa-aaaah-aaada-cai`
+   - ckBTC Mainnet Minter: `mqygn-kiaaa-aaaah-aaaqaa-cai`
+   - Set `USE_TESTNET = false` in swap canister
 
 ## Test Cases
 
-### 1. Balance Checks
-**Test**: `getCKBTCBalance(userId)`
-- **Setup**: User with known ckBTC balance
-- **Expected**: Returns correct balance in e8s (8 decimals)
-- **Validation**: Compare with expected balance
+### 1. ckBTC Ledger Integration
 
-### 2. Address Generation
-**Test**: `getBTCAddress(userId)`
-- **Setup**: Valid user principal
-- **Expected**: Returns valid Bitcoin address (mainnet format)
-- **Validation**: 
-  - Address format validation
-  - Address is unique per user
-  - Address can receive Bitcoin
+- [ ] Test balance query for user account
+- [ ] Test balance query for account with subaccount
+- [ ] Test balance query error handling (invalid account)
+- [ ] Test ledger metadata (decimals, symbol, name)
+- [ ] Test fee calculation
 
-### 3. Deposit Flow
-**Test**: Complete deposit flow
-1. Get Bitcoin address via `getBTCAddress(userId)`
-2. Send Bitcoin to the address (testnet)
-3. Call `updateBalance()` to mint ckBTC
-4. Verify ckBTC balance increased
-5. Verify mint transaction recorded
+### 2. ckBTC Minter Integration
 
-**Expected Results**:
-- ckBTC minted matches Bitcoin deposited (1:1 ratio)
-- Balance updates correctly
-- Transaction is recorded
+- [ ] Test Bitcoin address generation for user
+- [ ] Test Bitcoin address generation with subaccount
+- [ ] Test address generation error handling
+- [ ] Test minter info retrieval
 
-### 4. Withdrawal Flow
-**Test**: Complete withdrawal flow
-1. User has ckBTC balance
-2. Call `withdrawBTC(amount, btcAddress)`
-3. Verify ckBTC is burned
-4. Verify Bitcoin withdrawal request is created
-5. Wait for Bitcoin to arrive at address
+### 3. ckBTC Deposit Flow
 
-**Expected Results**:
-- ckBTC balance decreases
-- Withdrawal request is created
-- Bitcoin arrives at specified address
+- [ ] Test `updateBalance` with no new deposits
+- [ ] Test `updateBalance` with new Bitcoin deposit
+- [ ] Test `updateBalance` retry logic on TemporarilyUnavailable
+- [ ] Test `updateBalance` error handling (MalformedAddress, InsufficientFunds)
+- [ ] Test deposit amount validation
+- [ ] Test deposit confirmation requirements
 
-### 5. Error Scenarios
-- **Insufficient Balance**: Attempt withdrawal with insufficient ckBTC
-- **Invalid Address**: Attempt withdrawal to invalid Bitcoin address
-- **Amount Too Low**: Attempt withdrawal below minimum threshold
-- **Network Errors**: Handle ckBTC canister unavailability
+### 4. ckBTC Withdrawal Flow
 
-## Manual Testing Steps
+- [ ] Test `withdrawBTC` with valid address and amount
+- [ ] Test `withdrawBTC` with invalid Bitcoin address
+- [ ] Test `withdrawBTC` with amount below minimum
+- [ ] Test `withdrawBTC` with insufficient balance
+- [ ] Test `withdrawBTC` retry logic on TemporarilyUnavailable
+- [ ] Test `withdrawBTC` error handling (AlreadyProcessing)
+- [ ] Test withdrawal address validation
 
-### Test Deposit Flow
-```bash
-# 1. Get Bitcoin address
-dfx canister call swap_canister getBTCAddress '(principal "USER_PRINCIPAL")'
+### 5. Error Handling
 
-# 2. Send Bitcoin to address (use Bitcoin testnet)
-# Send 0.001 BTC to the address
+- [ ] Test TemporarilyUnavailable error retry (3 attempts)
+- [ ] Test non-retryable errors (MalformedAddress, InsufficientFunds)
+- [ ] Test network error handling
+- [ ] Test canister unavailable error handling
+- [ ] Test error message clarity and user-friendliness
 
-# 3. Update balance to mint ckBTC
-dfx canister call swap_canister updateBalance '()'
+### 6. Network Configuration
 
-# 4. Check ckBTC balance
-dfx canister call swap_canister getCKBTCBalance '(principal "USER_PRINCIPAL")'
-```
+- [ ] Test testnet canister ID configuration
+- [ ] Test mainnet canister ID configuration
+- [ ] Test network switching (if supported)
+- [ ] Test invalid canister ID error handling
 
-### Test Withdrawal Flow
-```bash
-# 1. Check ckBTC balance
-dfx canister call swap_canister getCKBTCBalance '(principal "USER_PRINCIPAL")'
+## Implementation Notes
 
-# 2. Withdraw ckBTC
-dfx canister call swap_canister withdrawBTC '(100000000 : nat64, "bc1qtest...")'
+- Retry logic is implemented in `updateBalance` and `withdrawBTC` methods
+- Retry attempts: 3 maximum
+- Retryable errors: TemporarilyUnavailable
+- Non-retryable errors: MalformedAddress, InsufficientFunds, AmountTooLow, AlreadyProcessing
 
-# 3. Verify withdrawal request created
-# Check ckBTC minter for withdrawal status
-```
+## Test Execution
 
-## Implementation Status
+To run ckBTC tests:
 
-✅ **Completed**:
-- ckBTC ledger actor creation
-- ckBTC minter actor creation
-- Balance retrieval (`getCKBTCBalance`)
-- Address generation (`getBTCAddress`)
-- Balance update (`updateBalance`)
-- BTC withdrawal (`withdrawBTC`)
-- Error handling
-- Input validation
-- Rate limiting
+1. Deploy swap canister to testnet
+2. Set `USE_TESTNET = true` in swap canister
+3. Run integration tests: `npm test -- ckbtc`
+4. Verify all test cases pass
 
-⚠️ **Needs Testing**:
-- Actual ckBTC canister integration (testnet/mainnet)
-- End-to-end deposit flow
-- End-to-end withdrawal flow
-- Error scenario handling
-- Network failure recovery
+## Known Limitations
 
-## Notes
-
-- ckBTC uses 8 decimals (same as Bitcoin)
-- Minimum withdrawal amounts apply (check minter configuration)
-- Withdrawal processing time varies (typically 1-2 hours)
-- Testnet ckBTC canister IDs need to be configured for testing
-
+- Motoko doesn't have built-in retry utilities, so retry logic is implemented inline
+- Retry delays are not implemented (would require timer support)
+- Network configuration is hardcoded (should be configurable via canister argument)

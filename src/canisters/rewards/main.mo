@@ -21,6 +21,7 @@ import RateLimiter "../shared/RateLimiter";
 import InputValidation "../shared/InputValidation";
 import Runestone "../shared/Runestone";
 import Segwit "mo:bitcoin/Segwit";
+import Base58Check "mo:bitcoin/Base58Check";
 
 persistent actor RewardsCanister {
   type Store = Types.Store;
@@ -215,11 +216,19 @@ persistent actor RewardsCanister {
 
   /// Get user's total rewards
   public query func getUserRewards(userId : Principal) : async Nat64 {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return 0
+    };
     Option.get<Nat64>(userRewards.get(userId), 0)
   };
 
   /// Get user's rune token rewards per store
   public query func getUserRuneTokenRewards(userId : Principal) : async [(StoreId, Nat64)] {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return []
+    };
     let userRuneRewardsOpt = userRuneTokenRewards.get(userId);
     switch userRuneRewardsOpt {
       case null [];
@@ -235,6 +244,10 @@ persistent actor RewardsCanister {
 
   /// Get store rune information
   public query func getStoreRuneInfo(storeId : StoreId) : async ?{ runeName : Text; runeId : ?Text; runeReward : Float } {
+    // Input validation
+    if (storeId == 0) {
+      return null
+    };
     storeRuneTokens.get(storeId)
   };
 
@@ -348,6 +361,10 @@ persistent actor RewardsCanister {
   /// Get user's reward address using BitcoinUtilsICP
   /// Generates a P2WPKH address for the user (SegWit for lower fees)
   public func getUserRewardAddress(userId : Principal) : async Result<Text, Text> {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
     if (not BTC_API_ENABLED) {
       return #err("Bitcoin integration not enabled")
     };
@@ -499,14 +516,41 @@ persistent actor RewardsCanister {
                   return #err("Insufficient funds for reward payout. Need: " # Nat64.toText(totalNeeded) # ", Available: " # Nat64.toText(selectedAmount))
                 };
                 
-                // 5. Build and sign transaction (simplified implementation)
-                // Note: Full Bitcoin transaction serialization should use the bitcoin library
+                // 5. Build and sign transaction
+                // NOTE: This is a simplified implementation. For production, consider using the bitcoin library
+                // (mo:bitcoin/bitcoin/Transaction) which handles proper witness data structure and sighash calculation.
+                // Current limitations:
+                // - Transaction signing appends signature directly (should be in witness data)
+                // - Proper sighash calculation for SegWit transactions requires witness commitment
+                // - Witness data structure is simplified
                 let change = selectedAmount - totalNeeded;
                 var txBytes = Buffer.Buffer<Nat8>(500);
                 
-                // Simplified transaction structure for signing
-                txBytes.add(0x00); txBytes.add(0x00); txBytes.add(0x00); txBytes.add(0x01); // Version
-                txBytes.add(Nat8.fromIntWrap(selectedUtxos.size())); // Input count
+                // Transaction structure for signing
+                // Version (4 bytes, little-endian)
+                txBytes.add(0x01); txBytes.add(0x00); txBytes.add(0x00); txBytes.add(0x00);
+                
+                // For SegWit transactions (P2WPKH or P2TR), add witness marker and flag
+                // Marker (0x00) and Flag (0x01) indicate witness data follows
+                let isSegWit = rewards > 0 or useTaproot; // User output is P2WPKH, or using Taproot
+                if (isSegWit) {
+                  txBytes.add(0x00); // Marker
+                  txBytes.add(0x01)  // Flag
+                };
+                
+                // Input count (variable-length integer)
+                // For values < 253, use single byte
+                let inputCount = selectedUtxos.size();
+                if (inputCount < 253) {
+                  txBytes.add(Nat8.fromIntWrap(inputCount))
+                } else if (inputCount < 65536) {
+                  // 253-65535: 0xFD + 2-byte little-endian
+                  txBytes.add(0xFD);
+                  txBytes.add(Nat8.fromIntWrap(inputCount % 256));
+                  txBytes.add(Nat8.fromIntWrap((inputCount / 256) % 256))
+                } else {
+                  return #err("Too many inputs for transaction")
+                };
                 
                 // Add inputs
                 for (utxo in selectedUtxos.vals()) {
@@ -532,7 +576,18 @@ persistent actor RewardsCanister {
                 
                 // Calculate output count: BTC output (if rewards > 0) + rune OP_RETURN outputs + change (if needed)
                 let numOutputs = (if (rewards > 0) 1 else 0) + Nat32.fromNat(runeTransfers.size()) + (if (change > 546) 1 else 0);
-                txBytes.add(Nat8.fromIntWrap(Nat32.toNat(numOutputs)));
+                // Output count (variable-length integer)
+                let outputCount = Nat32.toNat(numOutputs);
+                if (outputCount < 253) {
+                  txBytes.add(Nat8.fromIntWrap(outputCount))
+                } else if (outputCount < 65536) {
+                  // 253-65535: 0xFD + 2-byte little-endian
+                  txBytes.add(0xFD);
+                  txBytes.add(Nat8.fromIntWrap(outputCount % 256));
+                  txBytes.add(Nat8.fromIntWrap((outputCount / 256) % 256))
+                } else {
+                  return #err("Too many outputs for transaction")
+                };
                 
                 // BTC output to user (if rewards > 0)
                 if (rewards > 0) {
@@ -606,41 +661,147 @@ persistent actor RewardsCanister {
                 
                 // Change output if needed
                 if (change > 546) {
-                  var valueRemaining = change;
-                  var j = 0;
-                  while (j < 8) {
-                    txBytes.add(Nat8.fromIntWrap(Nat64.toNat(valueRemaining % 256)));
-                    valueRemaining /= 256;
-                    j += 1
+                  // Decode canister address to get script for change output
+                  // canisterAddress is P2PKH (from getCanisterRewardAddress) or P2TR (from getCanisterTaprootAddress)
+                  let changeScriptResult = if (useTaproot) {
+                    // For Taproot, decode as SegWit and use P2TR format
+                    switch (Segwit.decode(canisterAddress)) {
+                      case (#ok((_, witnessProgram))) {
+                        if (witnessProgram.version == 1 and witnessProgram.program.size() == 32) {
+                          // P2TR: OP_1 <32-byte-x-only-public-key>
+                          var scriptBuffer = Buffer.Buffer<Nat8>(34);
+                          scriptBuffer.add(0x51); // OP_1
+                          scriptBuffer.add(0x20); // Push 32 bytes
+                          for (byte in witnessProgram.program.vals()) {
+                            scriptBuffer.add(byte)
+                          };
+                          #ok(Buffer.toArray(scriptBuffer))
+                        } else {
+                          #err("Invalid Taproot address format for change output")
+                        }
+                      };
+                      case (#err(_)) #err("Failed to decode Taproot address for change output")
+                    }
+                  } else {
+                    // For P2PKH, decode using Base58Check
+                    switch (Base58Check.decode(canisterAddress)) {
+                      case (?decoded) {
+                        // P2PKH: version byte (1 byte) + 20-byte hash
+                        if (decoded.size() == 21) {
+                          // Extract 20-byte hash (skip version byte)
+                          var hashBuffer = Buffer.Buffer<Nat8>(20);
+                          var i = 1; // Start from index 1 (skip version byte)
+                          while (i < decoded.size() and hashBuffer.size() < 20) {
+                            hashBuffer.add(decoded[i]);
+                            i += 1
+                          };
+                          let hash = Buffer.toArray(hashBuffer);
+                          
+                          // P2PKH script: OP_DUP OP_HASH160 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG
+                          var scriptBuffer = Buffer.Buffer<Nat8>(25);
+                          scriptBuffer.add(0x76); // OP_DUP
+                          scriptBuffer.add(0xA9); // OP_HASH160
+                          scriptBuffer.add(0x14); // 20 bytes
+                          for (byte in hash.vals()) {
+                            scriptBuffer.add(byte)
+                          };
+                          scriptBuffer.add(0x88); // OP_EQUALVERIFY
+                          scriptBuffer.add(0xAC); // OP_CHECKSIG
+                          #ok(Buffer.toArray(scriptBuffer))
+                        } else {
+                          #err("Invalid P2PKH address format for change output")
+                        }
+                      };
+                      case null #err("Failed to decode P2PKH address for change output")
+                    }
                   };
-                  // P2PKH script: OP_DUP OP_HASH160 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG
-                  txBytes.add(25); txBytes.add(0x76); txBytes.add(0xA9); txBytes.add(0x14);
-                  // Use canister address hash (for now, zeros as placeholder - should decode canisterAddress)
-                  var k = 0;
-                  while (k < 20) {
-                    txBytes.add(0);
-                    k += 1
-                  };
-                  txBytes.add(0x88); txBytes.add(0xAC)
+                  
+                  switch changeScriptResult {
+                    case (#err(msg)) return #err(msg);
+                    case (#ok(changeScript)) {
+                      var valueRemaining = change;
+                      var j = 0;
+                      while (j < 8) {
+                        txBytes.add(Nat8.fromIntWrap(Nat64.toNat(valueRemaining % 256)));
+                        valueRemaining /= 256;
+                        j += 1
+                      };
+                      // Add script length and script
+                      txBytes.add(Nat8.fromIntWrap(changeScript.size()));
+                      for (byte in changeScript.vals()) {
+                        txBytes.add(byte)
+                      }
+                    }
+                  }
                 };
                 
-                // Locktime
+                // Locktime (4 bytes, little-endian)
                 txBytes.add(0); txBytes.add(0); txBytes.add(0); txBytes.add(0);
                 
                 // 6. Sign transaction (use Taproot derivation if rune tokens involved)
+                // NOTE: Proper Bitcoin transaction signing requires:
+                // - Computing sighash for each input (BIP 143 for SegWit, BIP 341 for Taproot)
+                // - Placing signatures in witness data structure
+                // - Including witness commitment in transaction
+                // Current implementation is simplified - for production, use proper sighash calculation
                 let derivationPath = BitcoinUtilsICP.createDerivationPath(if (useTaproot) 2 else 0);
-                let signResult = await BitcoinUtilsICP.signTransaction(Buffer.toArray(txBytes), derivationPath, null);
+                
+                // Compute transaction hash for signing
+                let txHash = BitcoinUtilsICP.computeTransactionHash(Buffer.toArray(txBytes));
+                let signResult = await BitcoinUtilsICP.signTransactionHash(txHash, derivationPath, null);
                 switch signResult {
                   case (#err(msg)) return #err("Failed to sign transaction: " # msg);
                   case (#ok(signature)) {
-                    // 7. Create signed transaction
-                    var signedTxBytes = Buffer.Buffer<Nat8>(txBytes.size() + signature.size());
-                    for (byte in txBytes.vals()) {
-                      signedTxBytes.add(byte)
+                    // 7. Create signed transaction with witness data
+                    // For SegWit transactions, add witness data after outputs and before locktime
+                    var signedTxBytes = Buffer.Buffer<Nat8>(txBytes.size() + 100); // Reserve space for witness
+                    
+                    // Copy transaction up to locktime (version, marker/flag, inputs, outputs)
+                    // We need to insert witness data before locktime
+                    let txBytesArray = Buffer.toArray(txBytes);
+                    let txSize = txBytesArray.size();
+                    // Calculate locktime start position (last 4 bytes are locktime)
+                    // We know txSize >= 4 because we always add locktime (4 bytes)
+                    let locktimeStart = if (txSize > 4) {
+                      txSize - 4
+                    } else if (txSize == 4) {
+                      0
+                    } else {
+                      return #err("Transaction too small")
                     };
-                    for (byte in signature.vals()) {
-                      signedTxBytes.add(byte)
+                    
+                    // Copy everything except locktime
+                    var i : Nat = 0;
+                    while (i < locktimeStart) {
+                      signedTxBytes.add(txBytesArray[i]);
+                      i := i + 1
                     };
+                    
+                    // Add witness data for SegWit transactions
+                    if (isSegWit) {
+                      // Witness data: for each input, add witness stack
+                      // For P2WPKH: [signature, publicKey]
+                      // For P2TR: [signature] (Schnorr signature)
+                      for (_ in selectedUtxos.vals()) {
+                        // Witness stack count (1 item: signature)
+                        signedTxBytes.add(0x01); // 1 item
+                        
+                        // Signature length (DER-encoded, variable length)
+                        if (signature.size() < 253) {
+                          signedTxBytes.add(Nat8.fromIntWrap(signature.size()))
+                        } else {
+                          return #err("Signature too large for simplified encoding")
+                        };
+                        
+                        // Signature bytes
+                        for (byte in signature.vals()) {
+                          signedTxBytes.add(byte)
+                        }
+                      }
+                    };
+                    
+                    // Add locktime
+                    signedTxBytes.add(0); signedTxBytes.add(0); signedTxBytes.add(0); signedTxBytes.add(0);
                     
                     // 8. Broadcast transaction
                     let broadcastResult = await BitcoinApi.send_transaction(BTC_NETWORK, Buffer.toArray(signedTxBytes));
@@ -701,6 +862,10 @@ persistent actor RewardsCanister {
 
   /// Get purchase history for a user
   public query func getUserPurchases(userId : Principal) : async [PurchaseRecord] {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return []
+    };
     Array.filter<PurchaseRecord>(
       Buffer.toArray(purchases),
       func(p) { Principal.equal(p.userId, userId) }

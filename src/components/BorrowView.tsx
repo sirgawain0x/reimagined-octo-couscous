@@ -205,7 +205,6 @@ function BorrowView() {
             <h2 className="text-2xl font-bold text-white mb-4">Your Active Borrows</h2>
             <div className="space-y-4">
               {borrows.map((borrow) => {
-                const asset = assets.find((a) => a.symbol === borrow.asset.toUpperCase())
                 const borrowedAmount = Number(borrow.borrowedAmount) / 1e8
                 
                 return (

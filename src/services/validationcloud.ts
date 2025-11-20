@@ -64,12 +64,9 @@ interface Transaction {
 
 export class ValidationCloudClient {
   private baseUrl: string
-  private apiKey: string
-  private network: 'mainnet' | 'testnet'
 
   constructor(config: ValidationCloudConfig) {
-    this.apiKey = config.apiKey
-    this.network = config.network
+    // Store config values directly in baseUrl construction
     this.baseUrl = `https://${config.network}.bitcoin.validationcloud.io/v1/${config.apiKey}`
   }
 

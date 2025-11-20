@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react"
 import type { LendingAsset, LendingDeposit, BorrowInfo } from "@/types"
-import { createLendingActor, requireAuth } from "@/services/canisters"
+import { createLendingActor } from "@/services/canisters"
 import { logError } from "@/utils/logger"
-import { Principal } from "@dfinity/principal"
 import { useICP } from "./useICP"
 import { retry, retryWithTimeout } from "@/utils/retry"
 import { checkRateLimit } from "@/utils/rateLimiter"
@@ -31,10 +30,13 @@ const mockLendingAssets: LendingAsset[] = [
   },
 ]
 
+// Mock deposits (unused but kept for reference)
+/*
 const mockDeposits: LendingDeposit[] = [
   { asset: "BTC", amount: 0.1, apy: 4.2 },
   { asset: "ETH", amount: 0.5, apy: 5.1 },
 ]
+*/
 
 export function useLending() {
   const [assets, setAssets] = useState<LendingAsset[]>([])
@@ -145,28 +147,39 @@ export function useLending() {
       const errorMessage = error instanceof Error ? error.message : String(error)
       const errorName = error instanceof Error ? error.name : ""
       
+      // Check for canister ID configuration errors (validation errors)
+      if (errorMessage.includes("canister ID not configured") || 
+          errorMessage.includes("appears to be a placeholder") ||
+          errorMessage.includes("has invalid format")) {
+        logError("Lending canister ID configuration error", error as Error)
+        // Display the full error message which includes helpful instructions
+        setError(errorMessage)
+        // Use fallback data
+        setAssets(mockLendingAssets)
+        setDeposits([])
+      } 
       // Check if error is due to network mismatch or missing canister (TrustError)
-      if (errorName === "TrustError" || errorMessage.includes("node signatures") || errorMessage.includes("TrustError")) {
+      else if (errorName === "TrustError" || errorMessage.includes("node signatures") || errorMessage.includes("TrustError")) {
         logError("Network mismatch or canister not found", error as Error)
         setError("Lending canister not found or network mismatch. Make sure VITE_ICP_NETWORK matches where your canisters are deployed (local vs ic).")
         // Use fallback data
         setAssets(mockLendingAssets)
         setDeposits([])
-      } else if (errorMessage.includes("placeholder") || errorMessage.includes("Invalid canister ID")) {
-        logError("Lending canister not deployed", error as Error)
-        setError("Lending canister is not deployed. Please deploy it or configure a valid canister ID.")
-        // Use fallback data
-        setAssets(mockLendingAssets)
-        setDeposits([])
-      } else if (errorMessage.includes("canister_not_found") || errorMessage.includes("not found")) {
+      } 
+      // Check for canister not found errors from the IC
+      else if (errorMessage.includes("canister_not_found") || 
+               errorMessage.includes("not found") ||
+               errorMessage.includes("Canister") && errorMessage.includes("not found")) {
         logError("Lending canister not found", error as Error)
-        setError("Lending canister not found. Please deploy the lending_canister or check your canister ID configuration.")
+        setError("Lending canister not found. The canister ID may be incorrect or the canister may not be deployed. Run 'dfx canister id lending_canister' to get the correct ID and update VITE_CANISTER_ID_LENDING in your .env file.")
         // Use fallback data
         setAssets(mockLendingAssets)
         setDeposits([])
-      } else {
+      } 
+      // Generic error handling
+      else {
         logError("Error loading lending data", error as Error)
-        setError("Failed to load lending data from canister")
+        setError(`Failed to load lending data: ${errorMessage}`)
         // Use fallback data if canister fails
         setAssets(mockLendingAssets)
         setDeposits([])

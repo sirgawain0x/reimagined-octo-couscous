@@ -91,14 +91,48 @@ npm run bitcoin:status
 
 ## Environment Variables
 
-Make sure your `.env` file has the canister IDs:
+### Getting Canister IDs
+
+**IMPORTANT**: The canister IDs in your `.env` file must be the actual IDs from your deployed canisters, not placeholders.
+
+After deploying your canisters, get the actual IDs:
+
+```bash
+# Deploy all canisters first
+dfx deploy
+
+# Get the actual canister IDs
+dfx canister id rewards_canister
+dfx canister id lending_canister
+dfx canister id portfolio_canister
+dfx canister id swap_canister
+```
+
+### Setting Up .env File
+
+Create a `.env` file in the project root with the actual canister IDs:
+
+```env
+# Get these IDs by running: dfx canister id <canister_name>
+VITE_CANISTER_ID_REWARDS=<actual-rewards-canister-id>
+VITE_CANISTER_ID_LENDING=<actual-lending-canister-id>
+VITE_CANISTER_ID_PORTFOLIO=<actual-portfolio-canister-id>
+VITE_CANISTER_ID_SWAP=<actual-swap-canister-id>
+VITE_ICP_NETWORK=local
+```
+
+**Example** (using the IDs from your deployment):
 ```env
 VITE_CANISTER_ID_REWARDS=uzt4z-lp777-77774-qaabq-cai
 VITE_CANISTER_ID_LENDING=uxrrr-q7777-77774-qaaaq-cai
 VITE_CANISTER_ID_PORTFOLIO=u6s2n-gx777-77774-qaaba-cai
-VITE_CANISTER_ID_SWAP=ulvla-h7777-77774-qaacq-cai
+VITE_CANISTER_ID_SWAP=ucwa4-rx777-77774-qaada-cai
 VITE_ICP_NETWORK=local
 ```
+
+**Note**: These are the actual canister IDs from your deployment. If you redeploy, you'll need to update these values.
+
+**Note**: Placeholder IDs (like those containing `7777-77774`) will cause errors. Always use the actual canister IDs from `dfx canister id`.
 
 ## Access Points
 

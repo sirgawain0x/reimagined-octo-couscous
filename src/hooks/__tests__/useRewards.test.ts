@@ -8,11 +8,14 @@ vi.mock('@/services/canisters')
 vi.mock('@/utils/logger')
 vi.mock('@/utils/retry')
 vi.mock('@/utils/rateLimiter')
+const mockUseICP = vi.fn(() => ({
+  principal: createMockPrincipal(),
+  isConnected: true,
+  isLoading: false,
+}))
+
 vi.mock('./useICP', () => ({
-  useICP: () => ({
-    principal: createMockPrincipal(),
-    isConnected: true,
-  }),
+  useICP: () => mockUseICP(),
 }))
 
 describe('useRewards', () => {
@@ -27,6 +30,11 @@ describe('useRewards', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(createRewardsActor).mockResolvedValue(mockActor as any)
+    mockUseICP.mockReturnValue({
+      principal: createMockPrincipal(),
+      isConnected: true,
+      isLoading: false,
+    })
   })
 
   it('should load stores on mount', async () => {
@@ -51,17 +59,15 @@ describe('useRewards', () => {
     })
   })
 
-  it('should handle purchase successfully', async () => {
+  it('should handle trackPurchase successfully', async () => {
     const mockReceipt = {
       ok: {
         purchaseId: BigInt(1),
-        storeId: 1,
-        amount: BigInt(1000),
-        reward: BigInt(50),
-        timestamp: BigInt(Date.now()),
+        rewardEarned: BigInt(50 * 1e8), // 50 BTC in nat64
+        runeTokenRewardEarned: BigInt(20 * 1e8),
       },
     }
-    mockActor.purchase.mockResolvedValue(mockReceipt)
+    mockActor.trackPurchase.mockResolvedValue(mockReceipt)
 
     const { result } = renderHook(() => useRewards())
 
@@ -69,15 +75,17 @@ describe('useRewards', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    await result.current.purchase(1, 1000)
+    const purchaseResult = await result.current.trackPurchase(1, 1000)
 
-    expect(mockActor.purchase).toHaveBeenCalledWith(1, BigInt(1000))
+    expect(mockActor.trackPurchase).toHaveBeenCalledWith(1, BigInt(1000 * 1e8))
+    expect(purchaseResult.success).toBe(true)
+    expect(purchaseResult.reward).toBe(50)
     expect(result.current.error).toBeNull()
   })
 
-  it('should handle purchase errors', async () => {
+  it('should handle trackPurchase errors', async () => {
     const errorMessage = 'Insufficient funds'
-    mockActor.purchase.mockResolvedValue({ err: errorMessage })
+    mockActor.trackPurchase.mockResolvedValue({ err: errorMessage })
 
     const { result } = renderHook(() => useRewards())
 
@@ -85,30 +93,46 @@ describe('useRewards', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    await result.current.purchase(1, 1000)
+    const purchaseResult = await result.current.trackPurchase(1, 1000)
 
-    expect(result.current.error).toBe(errorMessage)
+    expect(purchaseResult.success).toBe(false)
+    expect(purchaseResult.error).toBe(errorMessage)
   })
 
-  it('should load user rewards', async () => {
-    const mockRewards = BigInt(5000)
-    mockActor.getUserRewards.mockResolvedValue(mockRewards)
-
+  it('should validate purchase amount', async () => {
     const { result } = renderHook(() => useRewards())
 
     await waitFor(() => {
-      expect(result.current.rewards).toBe(5000)
+      expect(result.current.isLoading).toBe(false)
     })
+
+    const purchaseResult = await result.current.trackPurchase(1, 0)
+
+    expect(purchaseResult.success).toBe(false)
+    expect(purchaseResult.error).toContain('greater than zero')
+    expect(mockActor.trackPurchase).not.toHaveBeenCalled()
   })
 
-  it('should handle claim rewards successfully', async () => {
-    const mockTx = {
-      ok: {
-        txid: 'test-tx-id',
-        amount: BigInt(5000),
-      },
-    }
-    mockActor.claimRewards.mockResolvedValue(mockTx)
+  it('should validate store ID', async () => {
+    const { result } = renderHook(() => useRewards())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    const purchaseResult = await result.current.trackPurchase(0, 1000)
+
+    expect(purchaseResult.success).toBe(false)
+    expect(purchaseResult.error).toContain('Invalid store ID')
+    expect(mockActor.trackPurchase).not.toHaveBeenCalled()
+  })
+
+  it('should require authentication for trackPurchase', async () => {
+    mockUseICP.mockReturnValueOnce({
+      principal: null,
+      isConnected: false,
+      isLoading: false,
+    } as any)
 
     const { result } = renderHook(() => useRewards())
 
@@ -116,15 +140,15 @@ describe('useRewards', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    await result.current.claimRewards()
+    const purchaseResult = await result.current.trackPurchase(1, 1000)
 
-    expect(mockActor.claimRewards).toHaveBeenCalled()
-    expect(result.current.error).toBeNull()
+    expect(purchaseResult.success).toBe(false)
+    expect(purchaseResult.error).toContain('connected')
+    expect(mockActor.trackPurchase).not.toHaveBeenCalled()
   })
 
-  it('should get user reward address', async () => {
-    const mockAddress = 'bc1qtest123'
-    mockActor.getUserRewardAddress.mockResolvedValue({ ok: mockAddress })
+  it('should handle fallback stores when canister fails', async () => {
+    mockActor.getStores.mockRejectedValue(new Error('Network error'))
 
     const { result } = renderHook(() => useRewards())
 
@@ -132,10 +156,30 @@ describe('useRewards', () => {
       expect(result.current.isLoading).toBe(false)
     })
 
-    const address = await result.current.getRewardAddress()
+    // Should use fallback stores
+    expect(result.current.stores.length).toBeGreaterThan(0)
+  })
 
-    expect(mockActor.getUserRewardAddress).toHaveBeenCalled()
-    expect(address).toBe(mockAddress)
+  it('should handle refetch', async () => {
+    mockActor.getStores.mockResolvedValue([])
+
+    const { result } = renderHook(() => useRewards())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    await result.current.refetch()
+
+    expect(mockActor.getStores).toHaveBeenCalledTimes(2) // Initial + refetch
+  })
+
+  it('should handle loading states correctly', async () => {
+    mockActor.getStores.mockImplementation(() => new Promise(() => {})) // Never resolves
+
+    const { result } = renderHook(() => useRewards())
+
+    expect(result.current.isLoading).toBe(true)
   })
 })
 

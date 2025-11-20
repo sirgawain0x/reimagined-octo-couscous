@@ -172,5 +172,98 @@ describe('useLending', () => {
 
     expect(result.current.isLoading).toBe(true)
   })
+
+  it('should load available liquidity', async () => {
+    const mockAssets = [
+      { id: 'btc', name: 'Bitcoin', symbol: 'BTC', apy: 4.2 },
+    ]
+    mockActor.getLendingAssets.mockResolvedValue(mockAssets)
+    mockActor.getAvailableLiquidity.mockResolvedValue(BigInt(1000000000)) // 10 BTC in nat64
+
+    const { result } = renderHook(() => useLending())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    expect(result.current.availableLiquidity['btc']).toBe(10)
+  })
+
+  it('should handle Bitcoin deposit validation', async () => {
+    // Bitcoin deposit validation happens in the canister
+    // The hook calls deposit which triggers validation
+    const mockDepositId = BigInt(1)
+    mockActor.deposit.mockResolvedValue({ ok: mockDepositId })
+
+    const { result } = renderHook(() => useLending())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    const success = await result.current.deposit('btc', 1000)
+
+    expect(mockActor.deposit).toHaveBeenCalledWith('btc', BigInt(1000 * 1e8))
+    expect(success).toBe(true)
+  })
+
+  it('should handle withdrawal errors', async () => {
+    const errorMessage = 'Insufficient funds'
+    mockActor.withdraw.mockResolvedValue({ err: errorMessage })
+
+    const { result } = renderHook(() => useLending())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    await result.current.withdraw('btc', 500, 'test-address')
+
+    expect(result.current.error).toBe(errorMessage)
+  })
+
+  it('should handle borrow errors', async () => {
+    const errorMessage = 'Insufficient collateral'
+    mockActor.borrow.mockResolvedValue({ err: errorMessage })
+
+    const { result } = renderHook(() => useLending())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    await result.current.borrow('btc', 1000, 'eth', 2000)
+
+    expect(result.current.error).toBe(errorMessage)
+  })
+
+  it('should handle repay errors', async () => {
+    const errorMessage = 'Borrow not found'
+    mockActor.repay.mockResolvedValue({ err: errorMessage })
+
+    const { result } = renderHook(() => useLending())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    await result.current.repay(BigInt(1), 500)
+
+    expect(result.current.error).toBe(errorMessage)
+  })
+
+  it('should refresh data', async () => {
+    mockActor.getLendingAssets.mockResolvedValue([])
+
+    const { result } = renderHook(() => useLending())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    await result.current.refresh()
+
+    expect(mockActor.getLendingAssets).toHaveBeenCalledTimes(2) // Initial + refresh
+  })
 })
 

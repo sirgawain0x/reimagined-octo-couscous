@@ -95,16 +95,38 @@ describe('canisters service', () => {
   })
 
   describe('requireAuth', () => {
-    it('should return principal if authenticated', () => {
-      const principal = requireAuth(mockPrincipal)
+    it('should return principal if authenticated', async () => {
+      const { getIdentity } = await import('../icp')
+      vi.mocked(getIdentity).mockResolvedValue({
+        getPrincipal: vi.fn().mockResolvedValue(mockPrincipal),
+      } as any)
+
+      const principal = await requireAuth()
 
       expect(principal).toBe(mockPrincipal)
     })
 
-    it('should throw error if not authenticated', () => {
-      const anonymousPrincipal = Principal.anonymous()
+    it('should throw error if not authenticated', async () => {
+      const { getIdentity } = await import('../icp')
+      vi.mocked(getIdentity).mockResolvedValue(null)
 
-      expect(() => requireAuth(anonymousPrincipal)).toThrow('Authentication required')
+      await expect(requireAuth()).rejects.toThrow('User must be authenticated')
+    })
+  })
+
+  describe('error handling', () => {
+    it('should handle actor creation errors gracefully', async () => {
+      process.env.VITE_CANISTER_ID_REWARDS = 'test-canister-id'
+      const { createActor } = await import('../icp')
+      vi.mocked(createActor).mockRejectedValue(new Error('Network error'))
+
+      await expect(createRewardsActor()).rejects.toThrow()
+    })
+
+    it('should handle missing canister IDs with clear error messages', async () => {
+      delete process.env.VITE_CANISTER_ID_REWARDS
+
+      await expect(createRewardsActor()).rejects.toThrow('Rewards canister ID not configured')
     })
   })
 })

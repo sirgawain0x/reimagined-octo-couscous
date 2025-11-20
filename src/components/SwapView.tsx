@@ -91,7 +91,7 @@ export default function SwapView() {
         Trade ckBTC, ckETH, SOL, and ICP instantly
       </h2>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 lg:items-start">
         {/* Swap Form */}
         <div className="lg:col-span-2">
           <div className="bg-gray-800 rounded-xl shadow-lg p-6 space-y-4">
@@ -235,7 +235,7 @@ export default function SwapView() {
 
         {/* Info Panel */}
         <div className="lg:col-span-1 space-y-6">
-          <div className="bg-gray-800 rounded-xl shadow-lg p-6 sticky top-28">
+          <div className="bg-gray-800 rounded-xl shadow-lg p-6">
             <h2 className="text-xl font-bold text-white mb-4">Swap Info</h2>
             
             <div className="space-y-4 text-sm">

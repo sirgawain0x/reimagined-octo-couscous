@@ -213,7 +213,7 @@ export function useBitcoinBlockchainInfo() {
       const client = getValidationCloudClient()
       const blockchainInfo = await client.getBlockchainInfo()
       setInfo(blockchainInfo)
-      logInfo("Fetched Bitcoin blockchain info", blockchainInfo)
+      logInfo("Fetched Bitcoin blockchain info", blockchainInfo as unknown as Record<string, unknown>)
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err))
       logError("Error fetching Bitcoin blockchain info", error)

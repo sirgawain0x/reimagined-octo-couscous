@@ -4,12 +4,12 @@
 
 ### Portfolio Canister
 - **Calls to Rewards Canister**: `getUserRewards(userId)` - Passes userId from caller
-  - **Security**: Acceptable - Query method, userId is validated by caller's authentication
-  - **Recommendation**: Consider adding caller principal validation if needed for additional security
+  - **Security**: ✅ Principal validation added - users can only query their own portfolio
+  - **Security**: ✅ Caller principal must match userId parameter
 
 - **Calls to Lending Canister**: `getUserDeposits(userId)` - Passes userId from caller
-  - **Security**: Acceptable - Query method, userId is validated by caller's authentication
-  - **Recommendation**: Consider adding caller principal validation if needed for additional security
+  - **Security**: ✅ Principal validation added - users can only query their own portfolio
+  - **Security**: ✅ Caller principal must match userId parameter
 
 ### Canister ID Configuration
 - **Portfolio Canister**: Canister IDs are set via `setRewardsCanister` and `setLendingCanister`
@@ -78,16 +78,18 @@
 - **Security**: ✅ Admin methods require admin authentication
 
 ### Cross-Canister Authentication
-- **Security**: ✅ Portfolio canister passes caller's userId to other canisters
-- **Note**: This is acceptable for query methods, but consider adding principal validation if needed
+- **Security**: ✅ Portfolio canister validates that caller principal matches userId parameter
+- **Security**: ✅ Users can only query their own portfolio data
+- **Security**: ✅ Cross-canister calls are made with validated userId
 
 ## Recommendations
 
-1. **Add Principal Validation to Portfolio Cross-Canister Calls**: Consider validating that the caller's principal matches the userId parameter for additional security
-2. **Add Timeout Handling**: External API calls should have timeout handling (already implemented in hooks, but consider canister-level timeouts)
-3. **Add Retry Logic**: Consider adding retry logic for failed cross-canister calls
-4. **Monitor Rate Limiting**: Consider adding metrics/logging for rate limit violations
-5. **Add Canister ID Validation**: Consider validating canister IDs against a whitelist for production
+1. ✅ **Add Principal Validation to Portfolio Cross-Canister Calls**: COMPLETED - Principal validation added to portfolio methods
+2. **Add Admin System to Portfolio Canister**: Consider adding admin authentication for `setRewardsCanister` and `setLendingCanister` methods
+3. **Add Timeout Handling**: External API calls should have timeout handling (already implemented in hooks, but consider canister-level timeouts)
+4. **Add Retry Logic**: Consider adding retry logic for failed cross-canister calls
+5. **Monitor Rate Limiting**: Consider adding metrics/logging for rate limit violations
+6. **Add Canister ID Validation**: Consider validating canister IDs against a whitelist for production
 
 ## Summary
 
@@ -100,7 +102,8 @@
 - Cross-canister calls are properly authenticated
 
 **Remaining Work**:
-- Consider adding principal validation to portfolio cross-canister calls
+- ✅ Principal validation added to portfolio cross-canister calls
+- Add admin system to portfolio canister for configuration methods
 - Add monitoring/logging for security events
 - Consider canister ID whitelist for production
 
