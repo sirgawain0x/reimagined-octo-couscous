@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import type { LendingAsset, LendingDeposit } from "@/types"
+import type { LendingAsset, LendingDeposit, BorrowInfo } from "@/types"
 import { createLendingActor, requireAuth } from "@/services/canisters"
 import { logError } from "@/utils/logger"
 import { Principal } from "@dfinity/principal"
@@ -39,6 +39,8 @@ const mockDeposits: LendingDeposit[] = [
 export function useLending() {
   const [assets, setAssets] = useState<LendingAsset[]>([])
   const [deposits, setDeposits] = useState<LendingDeposit[]>([])
+  const [borrows, setBorrows] = useState<BorrowInfo[]>([])
+  const [availableLiquidity, setAvailableLiquidity] = useState<Record<string, number>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const { principal, isConnected } = useICP()
@@ -79,6 +81,22 @@ export function useLending() {
       
       setAssets(formattedAssets.length > 0 ? formattedAssets : mockLendingAssets)
       
+      // Load available liquidity for each asset
+      const liquidityMap: Record<string, number> = {}
+      for (const asset of formattedAssets) {
+        try {
+          const liquidity = await retryWithTimeout(
+            () => canister.getAvailableLiquidity(asset.id),
+            10000,
+            { maxRetries: 3, initialDelayMs: 1000 }
+          )
+          liquidityMap[asset.id] = Number(liquidity) / 1e8
+        } catch (err) {
+          liquidityMap[asset.id] = 0
+        }
+      }
+      setAvailableLiquidity(liquidityMap)
+
       // Load user deposits if connected
       if (isConnected && principal) {
         try {
@@ -97,8 +115,31 @@ export function useLending() {
           // User might not have deposits yet, which is fine
           setDeposits([])
         }
+
+        // Load user borrows if connected
+        try {
+          const userBorrows = await retryWithTimeout(
+            () => canister.getUserBorrows(principal),
+            10000,
+            { maxRetries: 3, initialDelayMs: 1000 }
+          )
+          const formattedBorrows: BorrowInfo[] = userBorrows.map((borrow) => ({
+            id: borrow.id,
+            asset: borrow.asset,
+            borrowedAmount: borrow.borrowedAmount,
+            collateralAmount: borrow.collateralAmount,
+            collateralAsset: borrow.collateralAsset,
+            interestRate: borrow.interestRate,
+            ltv: borrow.ltv,
+          }))
+          setBorrows(formattedBorrows)
+        } catch (err) {
+          // User might not have borrows yet, which is fine
+          setBorrows([])
+        }
       } else {
         setDeposits([])
+        setBorrows([])
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
@@ -243,13 +284,128 @@ export function useLending() {
     }
   }
 
+  async function borrow(
+    asset: string,
+    amount: number,
+    collateralAsset: string,
+    collateralAmount: number
+  ): Promise<boolean> {
+    if (!isConnected || !principal) {
+      logError("Borrow attempted without authentication", new Error("User not authenticated"))
+      return false
+    }
+
+    if (amount <= 0) {
+      logError("Invalid borrow amount", new Error(`Amount must be greater than 0, got ${amount}`))
+      return false
+    }
+
+    if (collateralAmount <= 0) {
+      logError("Invalid collateral amount", new Error(`Collateral amount must be greater than 0, got ${collateralAmount}`))
+      return false
+    }
+
+    if (!["BTC", "ETH", "SOL"].includes(asset.toUpperCase())) {
+      logError("Invalid asset", new Error(`Asset must be BTC, ETH, or SOL, got ${asset}`))
+      return false
+    }
+
+    if (!["BTC", "ETH", "SOL"].includes(collateralAsset.toUpperCase())) {
+      logError("Invalid collateral asset", new Error(`Collateral asset must be BTC, ETH, or SOL, got ${collateralAsset}`))
+      return false
+    }
+
+    try {
+      // Frontend rate limiting
+      checkRateLimit("lending", principal.toText())
+      
+      // borrow is an update method, requires authentication
+      const canister = await retry(
+        () => createLendingActor(false),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      // Convert amounts to nat64 (multiply by 1e8 for satoshi-like precision)
+      const amountNat64 = BigInt(Math.floor(amount * 1e8))
+      const collateralAmountNat64 = BigInt(Math.floor(collateralAmount * 1e8))
+      
+      const result = await retryWithTimeout(
+        () => canister.borrow(asset.toLowerCase(), amountNat64, collateralAsset.toLowerCase(), collateralAmountNat64),
+        30000, // 30 second timeout for update operations
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
+      
+      if ("ok" in result) {
+        await loadData() // Refresh data
+        return true
+      } else if ("err" in result) {
+        logError("Canister returned error", new Error(result.err), { asset, amount, collateralAsset, collateralAmount })
+        return false
+      }
+      
+      return false
+    } catch (error) {
+      logError("Error borrowing", error as Error, { asset, amount, collateralAsset, collateralAmount })
+      return false
+    }
+  }
+
+  async function repay(borrowId: bigint, amount: number): Promise<boolean> {
+    if (!isConnected || !principal) {
+      logError("Repay attempted without authentication", new Error("User not authenticated"))
+      return false
+    }
+
+    if (amount <= 0) {
+      logError("Invalid repay amount", new Error(`Amount must be greater than 0, got ${amount}`))
+      return false
+    }
+
+    try {
+      // Frontend rate limiting
+      checkRateLimit("lending", principal.toText())
+      
+      // repay is an update method, requires authentication
+      const canister = await retry(
+        () => createLendingActor(false),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      // Convert amount to nat64
+      const amountNat64 = BigInt(Math.floor(amount * 1e8))
+      
+      const result = await retryWithTimeout(
+        () => canister.repay(borrowId, amountNat64),
+        30000, // 30 second timeout for update operations
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
+      
+      if ("ok" in result) {
+        await loadData() // Refresh data
+        return true
+      } else if ("err" in result) {
+        logError("Canister returned error", new Error(result.err), { borrowId, amount })
+        return false
+      }
+      
+      return false
+    } catch (error) {
+      logError("Error repaying", error as Error, { borrowId, amount })
+      return false
+    }
+  }
+
   return {
     assets,
     deposits,
+    borrows,
+    availableLiquidity,
     isLoading,
     error,
     deposit,
     withdraw,
+    borrow,
+    repay,
     refetch: loadData,
   }
 }

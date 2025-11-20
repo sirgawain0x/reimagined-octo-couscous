@@ -87,5 +87,27 @@ module Types {
     value : Nat64;
     height : Nat32;
   };
+
+  public type Borrow = {
+    id : Nat64;
+    userId : Principal;
+    asset : Text;
+    borrowedAmount : Nat64;
+    collateralAmount : Nat64;
+    collateralAsset : Text;
+    interestRate : Float;
+    timestamp : Nat64;
+    repaid : Bool;
+  };
+
+  public type BorrowInfo = {
+    id : Nat64;
+    asset : Text;
+    borrowedAmount : Nat64;
+    collateralAmount : Nat64;
+    collateralAsset : Text;
+    interestRate : Float;
+    ltv : Float; // Loan-to-Value ratio
+  };
 };
 

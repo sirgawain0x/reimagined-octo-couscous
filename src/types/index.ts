@@ -34,7 +34,29 @@ export interface LendingDeposit {
   apy: number
 }
 
-export type View = "shop" | "lend" | "portfolio" | "swap"
+export interface Borrow {
+  id: bigint
+  userId: string
+  asset: string
+  borrowedAmount: bigint
+  collateralAmount: bigint
+  collateralAsset: string
+  interestRate: number
+  timestamp: bigint
+  repaid: boolean
+}
+
+export interface BorrowInfo {
+  id: bigint
+  asset: string
+  borrowedAmount: bigint
+  collateralAmount: bigint
+  collateralAsset: string
+  interestRate: number
+  ltv: number // Loan-to-Value ratio
+}
+
+export type View = "shop" | "lend" | "borrow" | "portfolio" | "swap"
 
 export type ChainKeyToken = "ckBTC" | "ckETH" | "SOL" | "ICP"
 

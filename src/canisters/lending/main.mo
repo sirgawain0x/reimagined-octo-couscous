@@ -1,6 +1,7 @@
 import Array "mo:base/Array";
 import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
+import Float "mo:base/Float";
 import HashMap "mo:base/HashMap";
 import Hash "mo:base/Hash";
 import Iter "mo:base/Iter";
@@ -22,6 +23,8 @@ persistent actor LendingCanister {
   type DepositInfo = Types.DepositInfo;
   type WithdrawalTx = Types.WithdrawalTx;
   type UtxoInfo = Types.UtxoInfo;
+  type Borrow = Types.Borrow;
+  type BorrowInfo = Types.BorrowInfo;
   type Result<Ok, Err> = Result.Result<Ok, Err>;
 
   // State
@@ -36,6 +39,21 @@ persistent actor LendingCanister {
   });
   private transient var userDeposits : HashMap.HashMap<Principal, [Nat64]> = HashMap.HashMap(0, Principal.equal, Principal.hash);
   private var nextDepositId : Nat64 = 1;
+
+  // Borrowing state
+  private transient var borrows : HashMap.HashMap<Nat64, Borrow> = HashMap.HashMap(0, func(a : Nat64, b : Nat64) : Bool { a == b }, func(a : Nat64) : Hash.Hash {
+    let n : Nat = Nat64.toNat(a);
+    let prime : Nat = 2654435761;
+    let hashValue = (n * prime) % 4294967296;
+    Nat32.fromNat(hashValue)
+  });
+  private transient var userBorrows : HashMap.HashMap<Principal, [Nat64]> = HashMap.HashMap(0, Principal.equal, Principal.hash);
+  private var nextBorrowId : Nat64 = 1;
+
+  // Borrowing parameters
+  private let MAX_LTV : Float = 0.75; // Maximum Loan-to-Value ratio (75%)
+  private let BORROW_INTEREST_RATE_MULTIPLIER : Float = 1.5; // Borrowing rate is 1.5x the lending APY
+  private let _LIQUIDATION_THRESHOLD : Float = 0.85; // Liquidation threshold (85% LTV)
 
   // Admin management (transient - will be lost on upgrade, first caller becomes admin)
   private transient var admins : HashMap.HashMap<Principal, Bool> = HashMap.HashMap(0, Principal.equal, Principal.hash);
@@ -304,6 +322,241 @@ persistent actor LendingCanister {
   /// Get Bitcoin custody balance
   public query func getBitcoinBalance() : async Nat64 {
     totalBitcoinBalance
+  };
+
+  /// Get available liquidity for borrowing
+  /// Returns the total amount available to borrow for each asset
+  public query func getAvailableLiquidity(asset : Text) : async Nat64 {
+    // Calculate total deposits for the asset
+    var totalDeposits : Nat64 = 0;
+    for (deposit in deposits.vals()) {
+      if (deposit.asset == asset) {
+        totalDeposits += deposit.amount
+      }
+    };
+    
+    // Calculate total borrowed for the asset
+    var totalBorrowed : Nat64 = 0;
+    for (borrow in borrows.vals()) {
+      if (borrow.asset == asset and not borrow.repaid) {
+        totalBorrowed += borrow.borrowedAmount
+      }
+    };
+    
+    // Available liquidity = deposits - borrowed (with some buffer for safety)
+    // Reserve 10% of deposits as a safety buffer
+    let reserveBuffer : Nat64 = Nat64.fromNat(Nat64.toNat(totalDeposits) / 10);
+    if (totalDeposits > reserveBuffer + totalBorrowed) {
+      totalDeposits - reserveBuffer - totalBorrowed
+    } else {
+      0
+    }
+  };
+
+  /// Get user's borrows
+  public query func getUserBorrows(userId : Principal) : async [BorrowInfo] {
+    let borrowIds = userBorrows.get(userId);
+    switch borrowIds {
+      case null [];
+      case (?ids) {
+        Array.map<Nat64, BorrowInfo>(
+          ids,
+          func(borrowId) : BorrowInfo {
+            switch (borrows.get(borrowId)) {
+              case null {
+                // This should never happen if borrows are valid, but handle gracefully
+                { id = 0; asset = ""; borrowedAmount = 0; collateralAmount = 0; collateralAsset = ""; interestRate = 0.0; ltv = 0.0 }
+              };
+              case (?borrow) {
+                // Calculate LTV (Loan-to-Value ratio)
+                // LTV = (borrowedAmount / collateralAmount) * 100
+                // For simplicity, we assume 1:1 price ratio between assets
+                // In production, you'd use actual price feeds
+                let ltv = if (borrow.collateralAmount > 0) {
+                  Float.fromInt(Nat64.toNat(borrow.borrowedAmount)) / Float.fromInt(Nat64.toNat(borrow.collateralAmount))
+                } else {
+                  0.0
+                };
+                {
+                  id = borrow.id;
+                  asset = borrow.asset;
+                  borrowedAmount = borrow.borrowedAmount;
+                  collateralAmount = borrow.collateralAmount;
+                  collateralAsset = borrow.collateralAsset;
+                  interestRate = borrow.interestRate;
+                  ltv = ltv;
+                }
+              }
+            }
+          }
+        )
+      }
+    }
+  };
+
+  /// Borrow assets using collateral
+  /// Users must deposit collateral first (as a deposit), then they can borrow against it
+  public shared (msg) func borrow(
+    asset : Text,
+    amount : Nat64,
+    collateralAsset : Text,
+    collateralAmount : Nat64
+  ) : async Result<Nat64, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
+    // Verify asset exists
+    switch (assets.get(asset)) {
+      case null {
+        #err("Asset not found")
+      };
+      case (?assetInfo) {
+        // Verify collateral asset exists
+        switch (assets.get(collateralAsset)) {
+          case null {
+            #err("Collateral asset not found")
+          };
+          case (?_collateralAssetInfo) {
+            if (amount == 0) {
+              return #err("Amount must be greater than 0")
+            };
+            if (collateralAmount == 0) {
+              return #err("Collateral amount must be greater than 0")
+            };
+
+            // Check if user has sufficient collateral
+            // User must have a deposit of the collateral asset
+            let userDepositIds = userDeposits.get(userId);
+            var totalCollateral : Nat64 = 0;
+            switch userDepositIds {
+              case null {
+                return #err("No collateral deposits found. Please deposit collateral first.")
+              };
+              case (?depositIds) {
+                for (depositId in depositIds.vals()) {
+                  switch (deposits.get(depositId)) {
+                    case null {};
+                    case (?deposit) {
+                      if (deposit.asset == collateralAsset) {
+                        totalCollateral += deposit.amount
+                      }
+                    }
+                  }
+                }
+              }
+            };
+
+            // Calculate LTV (Loan-to-Value ratio)
+            // For simplicity, assume 1:1 price ratio (in production, use price feeds)
+            let ltv = Float.fromInt(Nat64.toNat(amount)) / Float.fromInt(Nat64.toNat(collateralAmount));
+            
+            if (ltv > MAX_LTV) {
+              return #err("Loan-to-Value ratio too high. Maximum LTV is " # Float.toText(MAX_LTV * 100.0) # "%")
+            };
+
+            // Check if collateral is sufficient
+            if (totalCollateral < collateralAmount) {
+              return #err("Insufficient collateral. Required: " # Nat64.toText(collateralAmount) # ", Available: " # Nat64.toText(totalCollateral))
+            };
+
+            // Check available liquidity
+            let availableLiquidity = await getAvailableLiquidity(asset);
+            if (availableLiquidity < amount) {
+              return #err("Insufficient liquidity. Available: " # Nat64.toText(availableLiquidity) # ", Requested: " # Nat64.toText(amount))
+            };
+
+            // Calculate borrowing interest rate (higher than lending APY)
+            let borrowInterestRate = assetInfo.apy * BORROW_INTEREST_RATE_MULTIPLIER;
+
+            // Create borrow record
+            let borrowId = nextBorrowId;
+            nextBorrowId += 1;
+
+            let borrow : Borrow = {
+              id = borrowId;
+              userId = userId;
+              asset = asset;
+              borrowedAmount = amount;
+              collateralAmount = collateralAmount;
+              collateralAsset = collateralAsset;
+              interestRate = borrowInterestRate;
+              timestamp = Nat64.fromIntWrap(Time.now());
+              repaid = false;
+            };
+
+            // Update state
+            borrows.put(borrowId, borrow);
+
+            let existingBorrows = userBorrows.get(userId);
+            let updatedBorrows = Array.append(Option.get<[Nat64]>(existingBorrows, []), [borrowId]);
+            userBorrows.put(userId, updatedBorrows);
+
+            #ok(borrowId)
+          }
+        }
+      }
+    }
+  };
+
+  /// Repay a borrow
+  public shared (msg) func repay(
+    borrowId : Nat64,
+    amount : Nat64
+  ) : async Result<(), Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err("Rate limit exceeded. Please try again later.")
+    };
+
+    if (amount == 0) {
+      return #err("Amount must be greater than 0")
+    };
+
+    // Get the borrow
+    switch (borrows.get(borrowId)) {
+      case null {
+        #err("Borrow not found")
+      };
+      case (?borrow) {
+        // Verify ownership
+        if (Principal.notEqual(borrow.userId, userId)) {
+          return #err("Unauthorized: This borrow does not belong to you")
+        };
+
+        // Check if already repaid
+        if (borrow.repaid) {
+          return #err("Borrow already repaid")
+        };
+
+        // Check if repayment amount exceeds borrowed amount
+        if (amount > borrow.borrowedAmount) {
+          return #err("Repayment amount exceeds borrowed amount. Borrowed: " # Nat64.toText(borrow.borrowedAmount) # ", Repaying: " # Nat64.toText(amount))
+        };
+
+        // Update borrow record
+        let updatedBorrow : Borrow = {
+          id = borrow.id;
+          userId = borrow.userId;
+          asset = borrow.asset;
+          borrowedAmount = borrow.borrowedAmount - amount;
+          collateralAmount = borrow.collateralAmount;
+          collateralAsset = borrow.collateralAsset;
+          interestRate = borrow.interestRate;
+          timestamp = borrow.timestamp;
+          repaid = borrow.borrowedAmount - amount == 0; // Mark as repaid if fully repaid
+        };
+
+        borrows.put(borrowId, updatedBorrow);
+
+        #ok(())
+      }
+    }
   };
 
   /// Get UTXOs under custody (admin only)

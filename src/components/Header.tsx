@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react"
-import { ShoppingBag, Landmark, LayoutDashboard, Wallet, Bitcoin, CheckCircle, ArrowLeftRight, LogOut, Copy, ChevronDown } from "lucide-react"
+import { ShoppingBag, Landmark, LayoutDashboard, Wallet, Bitcoin, CheckCircle, ArrowLeftRight, LogOut, Copy, ChevronDown, CreditCard } from "lucide-react"
 import type { View } from "@/types"
 import type { AuthMethod } from "@/hooks/useICP"
 import type { Principal } from "@dfinity/principal"
@@ -22,6 +22,7 @@ function Header({ currentView, onNavigate, isConnected, onConnect, onDisconnect,
   const navItems = [
     { id: "shop" as View, name: "Shop & Earn", icon: ShoppingBag },
     { id: "lend" as View, name: "Lend", icon: Landmark },
+    { id: "borrow" as View, name: "Borrow", icon: CreditCard },
     { id: "portfolio" as View, name: "Portfolio", icon: LayoutDashboard },
     { id: "swap" as View, name: "Swap", icon: ArrowLeftRight },
   ]

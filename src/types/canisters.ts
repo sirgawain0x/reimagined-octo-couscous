@@ -7,12 +7,18 @@ export interface RewardsCanister {
   getUserRewards: (userId: Principal) => Promise<bigint>
 }
 
+import type { BorrowInfo } from "./index"
+
 export interface LendingCanister {
   getLendingAssets: () => Promise<LendingAsset[]>
   deposit: (asset: string, amount: bigint) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
   withdraw: (asset: string, amount: bigint, address: string) => Promise<{ ok: { txid: string; amount: bigint }; err?: string } | { ok?: { txid: string; amount: bigint }; err: string }>
   getUserDeposits: (userId: Principal) => Promise<LendingDeposit[]>
   getCurrentAPY: (asset: string) => Promise<number>
+  borrow: (asset: string, amount: bigint, collateralAsset: string, collateralAmount: bigint) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  repay: (borrowId: bigint, amount: bigint) => Promise<{ ok: void; err?: string } | { ok?: void; err: string }>
+  getUserBorrows: (userId: Principal) => Promise<BorrowInfo[]>
+  getAvailableLiquidity: (asset: string) => Promise<bigint>
 }
 
 export interface PortfolioCanister {

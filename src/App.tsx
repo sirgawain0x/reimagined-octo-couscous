@@ -3,6 +3,7 @@ import { useICP } from "@/hooks/useICP"
 import Header from "@/components/Header"
 import ShopView from "@/components/ShopView"
 import LendView from "@/components/LendView"
+import BorrowView from "@/components/BorrowView"
 import PortfolioView from "@/components/PortfolioView"
 import SwapView from "@/components/SwapView"
 import Footer from "@/components/Footer"
@@ -29,6 +30,7 @@ function App() {
       <main className="container mx-auto max-w-7xl p-6 lg:p-8">
         {view === "shop" && <ShopView />}
         {view === "lend" && <LendView />}
+        {view === "borrow" && <BorrowView />}
         {view === "portfolio" && <PortfolioView />}
         {view === "swap" && <SwapView />}
       </main>
