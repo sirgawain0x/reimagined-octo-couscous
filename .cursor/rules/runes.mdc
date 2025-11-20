@@ -43,8 +43,7 @@ pub fn encode_rune_name(name: &str) -> Result<u64, String> {
         } else {
             // Multiply previous value by 26 and add new digit
             value = value
-                .checked_add(1)
-                .and_then(|v| v.checked_mul(26))
+                .checked_mul(26)
                 .and_then(|v| v.checked_add(digit))
                 .ok_or("Rune name value overflow")?;
         }

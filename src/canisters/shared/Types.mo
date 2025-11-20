@@ -10,6 +10,9 @@ module Types {
     reward : Float;
     logo : Text;
     url : ?Text;
+    runeReward : Float;
+    runeName : ?Text;
+    runeId : ?Text;
   };
 
   public type StoreId = Nat32;
@@ -19,6 +22,7 @@ module Types {
     reward : Float;
     logo : Text;
     url : ?Text;
+    runeReward : Float;
   };
 
   public type PurchaseRecord = {
@@ -27,6 +31,7 @@ module Types {
     storeId : Nat32;
     amount : Nat64;
     reward : Nat64;
+    runeTokenRewards : Nat64;
     timestamp : Nat64;
     claimed : Bool;
   };
@@ -34,6 +39,7 @@ module Types {
   public type PurchaseReceipt = {
     purchaseId : Nat64;
     rewardEarned : Nat64;
+    runeTokenRewardEarned : Nat64;
   };
 
   public type BitcoinTx = {

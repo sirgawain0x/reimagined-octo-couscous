@@ -112,6 +112,6 @@ rm -rf .dfx
 
 Running rm -rf .dfx will permanently delete all the ICP smart contracts you have created locally.
 
-Step 2: In the folder where you're running bitcoind, stop the bitcoind process if it is running, and then delete the data folder you created.
-rm -r data
-mkdir data
+Step 2: In the folder where you're running bitcoind, stop the bitcoind process if it is running, and then delete the bitcoin_data folder you created.
+rm -r bitcoin_data
+mkdir bitcoin_data

@@ -9,7 +9,9 @@ import Result "mo:base/Result";
 import Text "mo:base/Text";
 import Principal "mo:base/Principal";
 import Option "mo:base/Option";
+import Array "mo:base/Array";
 import BitcoinUtils "BitcoinUtils";
+import Sha256 "mo:sha2/Sha256";
 
 module BitcoinUtilsICP {
   // ECDSA Canister Actor interface for accessing ICP system APIs
@@ -310,6 +312,59 @@ module BitcoinUtilsICP {
     } else {
       null
     }
+  };
+
+  /// Compute double SHA256 hash of transaction data
+  /// This is used for transaction signing (Bitcoin uses double SHA256)
+  public func computeTransactionHash(txBytes : [Nat8]) : [Nat8] {
+    // First SHA256
+    let firstHash = Blob.toArray(Sha256.fromArray(#sha256, txBytes));
+    // Second SHA256 (double hash)
+    Blob.toArray(Sha256.fromArray(#sha256, firstHash))
+  };
+
+  /// Sign a transaction hash using threshold ECDSA
+  /// The messageHash must be a 32-byte double SHA256 hash of the transaction
+  /// Returns the DER-encoded signature
+  public func signTransactionHash(
+    messageHash : [Nat8],
+    derivationPath : DerivationPath,
+    keyName : ?Text
+  ) : async Result.Result<[Nat8], Text> {
+    // Verify message hash is 32 bytes
+    if (messageHash.size() != 32) {
+      return #err("Message hash must be 32 bytes, got " # Nat32.toText(Nat32.fromNat(messageHash.size())))
+    };
+
+    let ecdsaCanister = getEcdsaCanister();
+    let key = Option.get<Text>(keyName, DEFAULT_ECDSA_KEY_NAME);
+    
+    try {
+      let response = await ecdsaCanister.sign_with_ecdsa({
+        message_hash = Blob.fromArray(messageHash);
+        derivation_path = derivationPath;
+        key_id = {
+          curve = #secp256k1;
+          name = key;
+        };
+      });
+      
+      let signatureBytes = Blob.toArray(response.signature);
+      #ok(signatureBytes)
+    } catch (_) {
+      #err("Failed to sign transaction hash")
+    }
+  };
+
+  /// Sign a transaction by computing its hash and signing it
+  /// This is a convenience function that combines hash computation and signing
+  public func signTransaction(
+    txBytes : [Nat8],
+    derivationPath : DerivationPath,
+    keyName : ?Text
+  ) : async Result.Result<[Nat8], Text> {
+    let messageHash = computeTransactionHash(txBytes);
+    await signTransactionHash(messageHash, derivationPath, keyName)
   };
 };
 

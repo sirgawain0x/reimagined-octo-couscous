@@ -1,6 +1,7 @@
 import Array "mo:base/Array";
 import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
+import Char "mo:base/Char";
 import Float "mo:base/Float";
 import HashMap "mo:base/HashMap";
 import Hash "mo:base/Hash";
@@ -15,7 +16,10 @@ import Text "mo:base/Text";
 import Time "mo:base/Time";
 import Types "./Types";
 import BitcoinUtilsICP "../shared/BitcoinUtilsICP";
+import BitcoinApi "../shared/BitcoinApi";
+import BitcoinUtils "../shared/BitcoinUtils";
 import RateLimiter "../shared/RateLimiter";
+import InputValidation "../shared/InputValidation";
 
 persistent actor LendingCanister {
   type LendingAsset = Types.LendingAsset;
@@ -62,8 +66,9 @@ persistent actor LendingCanister {
   private transient var bitcoinUtxos : Buffer.Buffer<UtxoInfo> = Buffer.Buffer(100);
   private var totalBitcoinBalance : Nat64 = 0;
 
-  // Bitcoin API integration placeholder
-  private let BTC_API_ENABLED : Bool = false;
+  // Bitcoin API integration
+  private let BTC_API_ENABLED : Bool = true; // Enable for regtest
+  private let BTC_NETWORK : BitcoinApi.Network = #Regtest;
 
   // Rate limiting (transient - resets on upgrade)
   private transient var rateLimiter = RateLimiter.RateLimiter(RateLimiter.LENDING_CONFIG);
@@ -145,22 +150,45 @@ persistent actor LendingCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(asset, 1, ?10)) {
+      return #err("Invalid asset symbol")
+    };
+    if (not InputValidation.validateAmount(amount, 1, null)) {
+      return #err("Amount must be greater than 0")
+    };
+
+    // Normalize asset to lowercase for consistent lookup and comparison
+    let normalizedAsset = Text.map(asset, func(c : Char) : Char {
+      if (c >= 'A' and c <= 'Z') {
+        Char.fromNat32(Char.toNat32(c) + 32) // Convert to lowercase
+      } else {
+        c
+      }
+    });
+
     // Verify asset exists
-    switch (assets.get(asset)) {
+    switch (assets.get(normalizedAsset)) {
       case null {
         #err("Asset not found")
       };
       case (?assetInfo) {
-        if (amount == 0) {
-          return #err("Amount must be greater than 0")
-        };
 
-        if (asset == "BTC" and BTC_API_ENABLED) {
-          // TODO: Implement Bitcoin deposit validation
-          // For now, just record the deposit
+        if (normalizedAsset == "btc" and BTC_API_ENABLED) {
+          // Validate Bitcoin deposit by checking UTXOs
+          let validationResult = await _validateBitcoinDeposit(userId, amount);
+          switch validationResult {
+            case (#err(msg)) return #err("Bitcoin deposit validation failed: " # msg);
+            case (#ok(())) {
+              // Deposit validated, continue with recording
+            }
+          }
         };
 
         // Create deposit record
@@ -170,7 +198,7 @@ persistent actor LendingCanister {
         let deposit : Deposit = {
           id = depositId;
           userId = userId;
-          asset = asset;
+          asset = normalizedAsset;
           amount = amount;
           timestamp = Nat64.fromIntWrap(Time.now());
           apy = assetInfo.apy;
@@ -184,7 +212,7 @@ persistent actor LendingCanister {
         userDeposits.put(userId, updatedDeposits);
 
         // Update Bitcoin balance if applicable
-        if (asset == "BTC") {
+        if (normalizedAsset == "btc") {
           totalBitcoinBalance += amount
         };
 
@@ -231,14 +259,33 @@ persistent actor LendingCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
-    if (amount == 0) {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(asset, 1, ?10)) {
+      return #err("Invalid asset symbol")
+    };
+    if (not InputValidation.validateAmount(amount, 1, null)) {
       return #err("Amount must be greater than 0")
     };
+    if (not InputValidation.validateText(recipientAddress, 26, ?62)) {
+      return #err("Invalid recipient address format")
+    };
 
-    if (asset == "BTC" and BTC_API_ENABLED) {
+    // Normalize asset to lowercase for consistent comparison
+    let normalizedAsset = Text.map(asset, func(c : Char) : Char {
+      if (c >= 'A' and c <= 'Z') {
+        Char.fromNat32(Char.toNat32(c) + 32) // Convert to lowercase
+      } else {
+        c
+      }
+    });
+
+    if (normalizedAsset == "btc" and BTC_API_ENABLED) {
       // Validate recipient address
       if (not BitcoinUtilsICP.validateAddress(recipientAddress, #Regtest)) {
         return #err("Invalid Bitcoin address")
@@ -263,15 +310,53 @@ persistent actor LendingCanister {
               switch txResult {
                 case (#err(msg)) return #err("Failed to build transaction: " # msg);
                 case (#ok(tx)) {
-                  // TODO: Sign transaction using threshold ECDSA
-                  // TODO: Serialize signed transaction
-                  // TODO: Broadcast via ICP Bitcoin API
-                  // For now, return error indicating signing/broadcast needed
-                  // Remove UTXOs from custody (they will be removed after successful broadcast)
-                  removeUtxos(selectedUtxos);
-                  totalBitcoinBalance -= (tx.totalInput - tx.change);
-                  
-                  return #ok({ txid = "pending_signature_" # Principal.toText(userId); amount = amount })
+                  // Serialize transaction for signing
+                  let txBytesResult = _serializeTransaction(tx, selectedUtxos);
+                  switch txBytesResult {
+                    case (#err(msg)) return #err("Failed to serialize transaction: " # msg);
+                    case (#ok(txBytes)) {
+                      // Get derivation path for signing (use index 0 for main canister address)
+                      let derivationPath = BitcoinUtilsICP.createDerivationPath(0);
+                      
+                      // Sign transaction
+                      let signResult = await BitcoinUtilsICP.signTransaction(txBytes, derivationPath, null);
+                      switch signResult {
+                        case (#err(msg)) return #err("Failed to sign transaction: " # msg);
+                        case (#ok(signature)) {
+                          // For now, we'll use a simplified approach:
+                          // Create a signed transaction by appending signature to tx bytes
+                          // Note: This is a simplified implementation - full Bitcoin transaction
+                          // serialization with proper witness data is more complex
+                          var signedTxBytes = Buffer.Buffer<Nat8>(txBytes.size() + signature.size());
+                          for (byte in txBytes.vals()) {
+                            signedTxBytes.add(byte)
+                          };
+                          for (byte in signature.vals()) {
+                            signedTxBytes.add(byte)
+                          };
+                          
+                          // Broadcast transaction via Bitcoin API
+                          let broadcastResult = await BitcoinApi.send_transaction(BTC_NETWORK, Buffer.toArray(signedTxBytes));
+                          switch broadcastResult {
+                            case (#err(msg)) {
+                              // Broadcast failed - don't remove UTXOs
+                              return #err("Failed to broadcast transaction: " # msg)
+                            };
+                            case (#ok(())) {
+                              // Success! Remove UTXOs from custody
+                              removeUtxos(selectedUtxos);
+                              totalBitcoinBalance -= (tx.totalInput - tx.change);
+                              
+                              // Generate a simple txid from the transaction bytes hash
+                              // In a real implementation, this would be the actual transaction ID
+                              let txid = BitcoinUtils.bytesToHex(Array.take<Nat8>(txBytes, 32));
+                              return #ok({ txid = txid; amount = amount })
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -288,11 +373,20 @@ persistent actor LendingCanister {
       };
       case (?depositIds) {
         // Find matching deposit (simplified - in production, you'd select the right UTXOs)
+        // Normalize asset to lowercase for consistent comparison with stored deposits
+        let normalizedAsset = Text.map(asset, func(c : Char) : Char {
+          if (c >= 'A' and c <= 'Z') {
+            Char.fromNat32(Char.toNat32(c) + 32) // Convert to lowercase
+          } else {
+            c
+          }
+        });
+        
         let depositIdOpt = Array.find<Nat64>(depositIds, func(id) {
           switch (deposits.get(id)) {
             case null false;
             case (?deposit) {
-              deposit.asset == asset and deposit.amount == amount
+              deposit.asset == normalizedAsset and deposit.amount == amount
             }
           }
         });
@@ -308,7 +402,7 @@ persistent actor LendingCanister {
             userDeposits.put(userId, filteredIds);
 
             // Update Bitcoin balance
-            if (asset == "BTC") {
+            if (normalizedAsset == "btc") {
               totalBitcoinBalance -= amount
             };
 
@@ -406,7 +500,7 @@ persistent actor LendingCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
     // Verify asset exists
@@ -511,7 +605,7 @@ persistent actor LendingCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
     if (amount == 0) {
@@ -571,6 +665,49 @@ persistent actor LendingCanister {
     totalBitcoinBalance += utxo.value
   };
 
+  /// Sync UTXOs from Bitcoin API for canister address
+  /// This function queries the Bitcoin API and updates the local UTXO tracking
+  /// Should be called periodically to keep UTXO state in sync
+  public shared (_msg) func syncUtxos() : async Result<(), Text> {
+    if (not BTC_API_ENABLED) {
+      return #err("Bitcoin integration not enabled")
+    };
+
+    // Get canister Bitcoin address
+    let addressResult = await getBitcoinDepositAddress();
+    switch addressResult {
+      case (#err(msg)) #err("Failed to get canister address: " # msg);
+      case (#ok(canisterAddress)) {
+        // Get UTXOs from Bitcoin API
+        let utxosResult = await BitcoinApi.get_utxos(BTC_NETWORK, canisterAddress, null);
+        switch utxosResult {
+          case (#err(msg)) #err("Failed to sync UTXOs: " # msg);
+          case (#ok(utxosResponse)) {
+            // Clear existing UTXOs and rebuild from API response
+            // Note: In production, you might want to merge instead of replace
+            bitcoinUtxos := Buffer.Buffer(utxosResponse.utxos.size());
+            totalBitcoinBalance := 0;
+            
+            // Add all UTXOs from API response
+            for (utxo in utxosResponse.utxos.vals()) {
+              bitcoinUtxos.add({
+                outpoint = {
+                  txid = Blob.toArray(utxo.outpoint.txid);
+                  vout = utxo.outpoint.vout;
+                };
+                value = utxo.value;
+                height = utxo.height;
+              });
+              totalBitcoinBalance += utxo.value
+            };
+            
+            #ok(())
+          }
+        }
+      }
+    }
+  };
+
   /// Select UTXOs for spending
   /// Uses a largest-first algorithm to minimize the number of inputs
   /// Returns UTXOs that sum to at least the target amount (including estimated fees)
@@ -615,6 +752,79 @@ persistent actor LendingCanister {
       #err("Insufficient UTXOs. Need: " # Nat64.toText(totalNeeded) # " (amount: " # Nat64.toText(targetAmount) # " + fee: " # Nat64.toText(estimatedFee) # "), Have: " # Nat64.toText(selectedAmount))
     } else {
       #ok(Buffer.toArray(selectedUtxos))
+    }
+  };
+
+  /// Validate Bitcoin deposit by checking UTXOs for user's deposit address
+  /// This function checks if the user has sent Bitcoin to their deposit address
+  /// and validates the amount matches the expected deposit
+  private func _validateBitcoinDeposit(
+    userId : Principal,
+    expectedAmount : Nat64
+  ) : async Result<(), Text> {
+    // Get user's Bitcoin deposit address
+    let addressResult = await getUserBitcoinDepositAddress(userId);
+    switch addressResult {
+      case (#err(msg)) #err("Failed to get deposit address: " # msg);
+      case (#ok(depositAddress)) {
+        // Get UTXOs for the deposit address (require at least 1 confirmation for regtest)
+        let utxosResult = await BitcoinApi.get_utxos(BTC_NETWORK, depositAddress, ?#MinConfirmations(1));
+        switch utxosResult {
+          case (#err(msg)) #err("Failed to query UTXOs: " # msg);
+          case (#ok(utxosResponse)) {
+            // Check if we have any UTXOs
+            if (utxosResponse.utxos.size() == 0) {
+              #err("No UTXOs found at deposit address. Please send Bitcoin to: " # depositAddress)
+            } else {
+              // Calculate total value of UTXOs at this address
+              var totalValue : Nat64 = 0;
+              var newUtxos : Buffer.Buffer<UtxoInfo> = Buffer.Buffer(10);
+              
+              label utxoCheck for (utxo in utxosResponse.utxos.vals()) {
+                // Check if this UTXO is already tracked
+                var isTracked = false;
+                label trackCheck for (trackedUtxo in bitcoinUtxos.vals()) {
+                  let txidBytes = Blob.toArray(utxo.outpoint.txid);
+                  if (txidBytes == trackedUtxo.outpoint.txid and utxo.outpoint.vout == trackedUtxo.outpoint.vout) {
+                    isTracked := true;
+                    break trackCheck
+                  }
+                };
+                
+                // If not tracked, it's a new deposit
+                if (not isTracked) {
+                  newUtxos.add({
+                    outpoint = {
+                      txid = Blob.toArray(utxo.outpoint.txid);
+                      vout = utxo.outpoint.vout;
+                    };
+                    value = utxo.value;
+                    height = utxo.height;
+                  });
+                  totalValue += utxo.value
+                }
+              };
+              
+              // Check if we have new deposits and validate amount
+              if (newUtxos.size() == 0) {
+                #err("No new deposits found. All UTXOs are already tracked.")
+              } else if (totalValue < expectedAmount) {
+                #err("Deposit amount mismatch. Expected: " # Nat64.toText(expectedAmount) # " satoshis, Found: " # Nat64.toText(totalValue) # " satoshis in new UTXOs")
+              } else {
+                // Add new UTXOs to tracking
+                for (utxo in newUtxos.vals()) {
+                  bitcoinUtxos.add(utxo)
+                };
+                
+                // Update total Bitcoin balance
+                totalBitcoinBalance += totalValue;
+                
+                #ok(())
+              }
+            }
+          }
+        }
+      }
     }
   };
 
@@ -730,6 +940,124 @@ persistent actor LendingCanister {
     })
   };
 
+  /// Serialize transaction to bytes for signing
+  /// This is a simplified serialization - full Bitcoin transaction format is more complex
+  /// For production, consider using the bitcoin library's Transaction module
+  private func _serializeTransaction(
+    tx : {
+      inputs : [UtxoInfo];
+      outputs : [(Text, Nat64)];
+      totalInput : Nat64;
+      totalOutput : Nat64;
+      fee : Nat64;
+      change : Nat64;
+    },
+    selectedUtxos : [UtxoInfo]
+  ) : Result<[Nat8], Text> {
+    // Create a simplified transaction representation
+    // Version (4 bytes, little-endian)
+    var txBytes = Buffer.Buffer<Nat8>(1000);
+    
+    // Version: 0x01000000 (1, little-endian)
+    txBytes.add(0x00);
+    txBytes.add(0x00);
+    txBytes.add(0x00);
+    txBytes.add(0x01);
+    
+    // Input count (varint)
+    let inputCount = selectedUtxos.size();
+    if (inputCount == 0) {
+      return #err("No inputs in transaction")
+    };
+    
+    // Simple varint encoding for input count (assuming < 253)
+    if (inputCount < 253) {
+      txBytes.add(Nat8.fromIntWrap(inputCount))
+    } else {
+      return #err("Too many inputs for simplified serialization")
+    };
+    
+    // Inputs (simplified - just include outpoint references)
+    for (utxo in selectedUtxos.vals()) {
+      // Previous output hash (32 bytes, reversed)
+      // utxo.outpoint.txid is [Nat8] according to Types.mo
+      let txidBytes = utxo.outpoint.txid;
+      // Bitcoin uses little-endian for txid in transaction format
+      var i = txidBytes.size();
+      while (i > 0) {
+        i -= 1;
+        txBytes.add(txidBytes[i])
+      };
+      // Pad to 32 bytes if needed
+      var bytesAdded = txidBytes.size();
+      while (bytesAdded < 32) {
+        txBytes.add(0);
+        bytesAdded += 1
+      };
+      
+      // Output index (4 bytes, little-endian)
+      let vout = utxo.outpoint.vout;
+      txBytes.add(Nat8.fromIntWrap(Nat32.toNat(vout) % 256));
+      txBytes.add(Nat8.fromIntWrap((Nat32.toNat(vout) / 256) % 256));
+      txBytes.add(Nat8.fromIntWrap((Nat32.toNat(vout) / 65536) % 256));
+      txBytes.add(Nat8.fromIntWrap((Nat32.toNat(vout) / 16777216) % 256));
+      
+      // Script length (varint) - placeholder 0 for now
+      txBytes.add(0);
+      
+      // Sequence (4 bytes) - default 0xFFFFFFFF
+      txBytes.add(0xFF);
+      txBytes.add(0xFF);
+      txBytes.add(0xFF);
+      txBytes.add(0xFF)
+    };
+    
+    // Output count (varint)
+    let outputCount = tx.outputs.size();
+    if (outputCount < 253) {
+      txBytes.add(Nat8.fromIntWrap(outputCount))
+    } else {
+      return #err("Too many outputs for simplified serialization")
+    };
+    
+    // Outputs
+    for ((address, value) in tx.outputs.vals()) {
+      // Value (8 bytes, little-endian)
+      var valueRemaining = value;
+      var j = 0;
+      while (j < 8) {
+        txBytes.add(Nat8.fromIntWrap(Nat64.toNat(valueRemaining % 256)));
+        valueRemaining /= 256;
+        j += 1
+      };
+      
+      // Script length placeholder (will be filled with actual script)
+      // For now, use a simple placeholder
+      txBytes.add(25); // P2PKH script length
+      
+      // Script placeholder (25 bytes for P2PKH: OP_DUP OP_HASH160 20bytes OP_EQUALVERIFY OP_CHECKSIG)
+      txBytes.add(0x76); // OP_DUP
+      txBytes.add(0xA9); // OP_HASH160
+      txBytes.add(0x14); // 20 bytes
+      // 20 bytes of address hash (placeholder - would need to decode address)
+      var k = 0;
+      while (k < 20) {
+        txBytes.add(0);
+        k += 1
+      };
+      txBytes.add(0x88); // OP_EQUALVERIFY
+      txBytes.add(0xAC) // OP_CHECKSIG
+    };
+    
+    // Locktime (4 bytes) - 0 for now
+    txBytes.add(0);
+    txBytes.add(0);
+    txBytes.add(0);
+    txBytes.add(0);
+    
+    #ok(Buffer.toArray(txBytes))
+  };
+
   /// Remove spent UTXOs from custody
   public func removeUtxos(spentUtxos : [UtxoInfo]) : () {
     for (spentUtxo in spentUtxos.vals()) {
@@ -754,7 +1082,7 @@ persistent actor LendingCanister {
     
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
     if (not isAdmin(userId)) {
@@ -770,7 +1098,7 @@ persistent actor LendingCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
     if (not isAdmin(userId)) {

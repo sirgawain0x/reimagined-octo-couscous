@@ -65,7 +65,7 @@ persistent actor PortfolioCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
     rewardsCanisterId := ?canisterId;
@@ -78,7 +78,7 @@ persistent actor PortfolioCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
     lendingCanisterId := ?canisterId;

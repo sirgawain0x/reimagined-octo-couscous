@@ -15,6 +15,9 @@ import Types "./Types";
 import RateLimiter "../shared/RateLimiter";
 import SolRpcClient "../shared/SolRpcClient";
 import SolanaUtils "../shared/SolanaUtils";
+import CKBTC "../shared/CKBTC";
+import InputValidation "../shared/InputValidation";
+import Nat "mo:base/Nat";
 
 persistent actor SwapCanister {
   type ChainKeyToken = Types.ChainKeyToken;
@@ -24,69 +27,22 @@ persistent actor SwapCanister {
   type SwapResult = Types.SwapResult;
   type Result<Ok, Err> = Result.Result<Ok, Err>;
 
-  // Chain-Key Token Canister References (Mainnet)
+  // Chain-Key Token Canister References
+  // Mainnet:
   // ckBTC Ledger: mxzaz-hqaaa-aaaah-aaada-cai
   // ckBTC Minter: mqygn-kiaaa-aaaah-aaaqaa-cai
-  // For now, we'll use placeholder principals
+  // Testnet: (to be configured via environment)
   
-  // ICRC Standard Types (needed for CKBTC ledger interface)
-  private type TransferArgs = {
-    from : { owner : Principal; subaccount : ?Blob };
-    to : { owner : Principal; subaccount : ?Blob };
-    amount : Nat;
-    fee : ?Nat;
-    memo : ?Blob;
-    created_at_time : ?Nat64;
-  };
-
-  private type TransferError = {
-    #GenericError : { message : Text; error_code : Nat };
-    #TemporarilyUnavailable;
-    #InsufficientFunds : { balance : Nat };
-    #BadBurn : { min_burn_amount : Nat };
-    #Duplicate : { duplicate_of : Nat };
-    #BadFee : { expected_fee : Nat };
-  };
-
-  private type Account = {
-    owner : Principal;
-    subaccount : ?Blob;
-  };
-
-  private type TxIndex = Nat;
-  private type BlockIndex = Nat;
-
-  private type MintTx = {
-    amount : Nat;
-    block_index : BlockIndex;
-  };
-
-  private type MinterError = {
-    #GenericError : { error_message : Text; error_code : Nat };
-    #TemporarilyUnavailable : { error_message : Text; error_code : Nat };
-    #MalformedAddress;
-    #InsufficientFunds : { balance : Nat };
-    #AmountTooLow : { min_withdrawal_amount : Nat };
-    #AlreadyProcessing;
-  };
-
-  private type RetrieveBtcRequest = {
-    address : Text;
-    amount : Nat;
-    created_at : ?Nat64;
-  };
-
-  private transient let _CKBTC_LEDGER : actor {
-    icrc1_transfer : (TransferArgs) -> async Result<TxIndex, TransferError>;
-    icrc1_balance_of : (Account) -> async Nat;
-    icrc1_decimals : () -> async Nat8;
-  } = actor("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-
-  private transient let _CKBTC_MINTER : actor {
-    get_btc_address : (?Principal) -> async { address : Text };
-    update_balance : (Principal) -> async Result<MintTx, MinterError>;
-    retrieve_btc : (RetrieveBtcRequest) -> async Result<BlockIndex, MinterError>;
-  } = actor("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  // ckBTC actors (will be initialized with actual canister IDs)
+  // For now, using placeholder - should be set from environment config
+  private let CKBTC_LEDGER_ID : Principal = Principal.fromText("mxzaz-hqaaa-aaaah-aaada-cai"); // Mainnet ledger
+  private let CKBTC_MINTER_ID : Principal = Principal.fromText("mqygn-kiaaa-aaaah-aaaqaa-cai"); // Mainnet minter
+  
+  private let ckbtcLedger = CKBTC.createLedgerActor(CKBTC_LEDGER_ID);
+  private let ckbtcMinter = CKBTC.createMinterActor(CKBTC_MINTER_ID);
+  
+  // Type aliases for convenience
+  private type BlockIndex = CKBTC.BlockIndex;
 
   // Internal AMM pools
   private transient var pools : HashMap.HashMap<Text, SwapPool> = HashMap.HashMap(0, Text.equal, Text.hash);
@@ -172,8 +128,23 @@ persistent actor SwapCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(poolId, 1, ?50)) {
+      return #err("Invalid pool ID")
+    };
+    if (not InputValidation.validateAmount(amountIn, 1, null)) {
+      return #err("Amount must be greater than 0")
+    };
+    if (not InputValidation.validateAmount(minAmountOut, 1, null)) {
+      return #err("Minimum amount out must be greater than 0")
+    };
+
     let poolOpt = pools.get(poolId);
     
     switch poolOpt {
@@ -231,45 +202,72 @@ persistent actor SwapCanister {
     }
   };
 
-  /// Get ckBTC balance for user (placeholder)
-  public query func getCKBTCBalance(_userId : Principal) : async Nat {
-    // TODO: Implement actual balance check via CKBTC_LEDGER
-    0
+  /// Get ckBTC balance for user
+  public func getCKBTCBalance(userId : Principal) : async Result<Nat, Text> {
+    let account : CKBTC.Account = {
+      owner = userId;
+      subaccount = null;
+    };
+    await CKBTC.getBalance(ckbtcLedger, account)
   };
 
-  /// Get Bitcoin address for ckBTC deposit (placeholder)
-  public query func getBTCAddress(_userId : Principal) : async Text {
-    // TODO: Implement actual address generation via CKBTC_MINTER
-    "bc1qplaceholder"
+  /// Get Bitcoin address for ckBTC deposit
+  public func getBTCAddress(userId : Principal) : async Result<Text, Text> {
+    await CKBTC.getBTCAddress(ckbtcMinter, ?userId)
   };
 
-  /// Check ckBTC deposit status (placeholder)
+  /// Check ckBTC deposit status and update balance
+  /// This checks for new Bitcoin deposits and mints corresponding ckBTC
   public shared (msg) func updateBalance() : async Result<Nat, Text> {
     let userId = msg.caller;
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
-    // TODO: Implement actual balance update via CKBTC_MINTER
-    #ok(0)
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+
+    // Update balance via ckBTC minter
+    let result = await CKBTC.updateBalance(ckbtcMinter, userId);
+    switch result {
+      case (#err(msg)) #err(msg);
+      case (#ok(mintTx)) {
+        // Return the minted amount
+        #ok(mintTx.amount)
+      }
+    }
   };
 
-  /// Retrieve ckBTC as BTC (placeholder)
+  /// Retrieve ckBTC as BTC (withdraw)
+  /// Burns ckBTC and retrieves native Bitcoin to the specified address
   public shared (msg) func withdrawBTC(
-    _amount : Nat64,
-    _btcAddress : Text
+    amount : Nat64,
+    btcAddress : Text
   ) : async Result<BlockIndex, Text> {
     let userId = msg.caller;
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
-    // TODO: Implement actual withdrawal via CKBTC_MINTER
-    #ok(0)
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(btcAddress, 26, ?62)) {
+      return #err("Invalid Bitcoin address format")
+    };
+    if (not InputValidation.validateAmount(amount, 1, null)) {
+      return #err("Amount must be greater than 0")
+    };
+
+    // Retrieve BTC via ckBTC minter
+    await CKBTC.retrieveBTC(ckbtcMinter, btcAddress, Nat64.toNat(amount), null)
   };
 
   /// Get swap history for user
@@ -296,7 +294,7 @@ persistent actor SwapCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
     };
 
     let rpcSources = #Default(#Mainnet);
@@ -408,7 +406,12 @@ persistent actor SwapCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
     };
 
     // Derive path from user principal
@@ -439,7 +442,18 @@ persistent actor SwapCanister {
 
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
-      return #err("Rate limit exceeded. Please try again later.")
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(toAddress, 32, ?44)) {
+      return #err("Invalid Solana address format")
+    };
+    if (not InputValidation.validateAmount(amountLamports, 1, null)) {
+      return #err("Amount must be greater than 0")
     };
 
     // 1. Get Solana address for sender

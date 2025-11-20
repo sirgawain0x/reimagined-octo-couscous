@@ -5,7 +5,10 @@ import HashMap "mo:base/HashMap";
 import Principal "mo:base/Principal";
 import Time "mo:base/Time";
 import Nat64 "mo:base/Nat64";
+import Nat "mo:base/Nat";
 import Array "mo:base/Array";
+import Text "mo:base/Text";
+import Int "mo:base/Int";
 
 module RateLimiter {
   // Rate limit entry tracking requests in current window
@@ -18,6 +21,13 @@ module RateLimiter {
   public type RateLimitConfig = {
     maxRequests : Nat64; // Maximum requests allowed
     windowMs : Nat64; // Time window in milliseconds
+  };
+
+  // Rate limit status for error messages
+  public type RateLimitStatus = {
+    remaining : Nat64;
+    resetTime : Int; // Timestamp in nanoseconds when limit resets
+    maxRequests : Nat64;
   };
 
   // Default configurations for different operation types
@@ -111,6 +121,42 @@ module RateLimiter {
       }
     };
 
+    // Get rate limit status for error messages
+    public func getStatus(principal : Principal) : RateLimitStatus {
+      let now = Time.now();
+      let entry = entries.get(principal);
+      
+      switch (entry) {
+        case null {
+          {
+            remaining = config.maxRequests;
+            resetTime = now + (Nat64.toNat(config.windowMs) * 1_000_000); // Convert ms to ns
+            maxRequests = config.maxRequests;
+          }
+        };
+        case (?e) {
+          if (now > e.resetTime) {
+            {
+              remaining = config.maxRequests;
+              resetTime = now + (Nat64.toNat(config.windowMs) * 1_000_000);
+              maxRequests = config.maxRequests;
+            }
+          } else {
+            let remaining : Nat64 = if (e.count >= config.maxRequests) {
+              0 : Nat64
+            } else {
+              config.maxRequests - e.count
+            };
+            {
+              remaining = remaining;
+              resetTime = e.resetTime;
+              maxRequests = config.maxRequests;
+            }
+          }
+        }
+      }
+    };
+
     // Reset rate limit for principal (useful for testing)
     public func reset(principal : Principal) {
       entries.delete(principal)
@@ -129,6 +175,29 @@ module RateLimiter {
       
       for (principal in toDelete.vals()) {
         entries.delete(principal)
+      }
+    };
+
+    // Format rate limit error message with remaining requests and reset time
+    public func formatError(principal : Principal) : Text {
+      let status = getStatus(principal);
+      let now = Time.now();
+      let secondsUntilReset : Int = if (status.resetTime > now) {
+        (status.resetTime - now) / 1_000_000_000 // Convert nanoseconds to seconds
+      } else {
+        0
+      };
+      
+      let windowSecondsNat = Nat64.toNat(config.windowMs) / 1000; // Convert ms to seconds
+      let windowSeconds = Nat64.fromNat(windowSecondsNat); // Convert back to Nat64 for consistency
+      
+      if (status.remaining == 0) {
+        "Rate limit exceeded. " # Nat64.toText(status.maxRequests) # " requests per " # 
+        Nat64.toText(windowSeconds) # " seconds. Please try again in " # 
+        Int.toText(secondsUntilReset) # " seconds."
+      } else {
+        "Rate limit exceeded. " # Nat64.toText(status.remaining) # " requests remaining. " #
+        "Limit resets in " # Int.toText(secondsUntilReset) # " seconds."
       }
     };
   };
