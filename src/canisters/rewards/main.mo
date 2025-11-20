@@ -308,8 +308,8 @@ persistent actor RewardsCanister {
                         switch runestoneResult {
                           case (#err(msg)) return #err("Failed to encode runestone: " # msg);
                           case (#ok(runestoneData)) {
-                            // Build OP_RETURN output
-                            let opReturnScript = Runestone.buildOpReturnOutput(runestoneData);
+                            // Build OP_RETURN output (placeholder for future implementation)
+                            let _opReturnScript = Runestone.buildOpReturnOutput(runestoneData);
                             
                             // Build transaction (simplified - would need proper Bitcoin library for full implementation)
                             // For now, return a placeholder rune ID
@@ -721,6 +721,17 @@ persistent actor RewardsCanister {
       return #err(rateLimiter.formatError(userId))
     };
 
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validatePrincipal(newAdmin)) {
+      return #err("Invalid admin principal")
+    };
+    if (Principal.isAnonymous(newAdmin)) {
+      return #err("Cannot add anonymous principal as admin")
+    };
+
     if (not isAdmin(userId)) {
       return #err("Unauthorized: Only admins can add other admins")
     };
@@ -735,6 +746,14 @@ persistent actor RewardsCanister {
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
       return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validatePrincipal(adminToRemove)) {
+      return #err("Invalid admin principal")
     };
 
     if (not isAdmin(userId)) {

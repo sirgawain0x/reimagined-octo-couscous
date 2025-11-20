@@ -297,6 +297,14 @@ persistent actor SwapCanister {
       return #err(rateLimiter.formatError(userId))
     };
 
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(solAddress, 32, ?44)) {
+      return #err("Invalid Solana address format")
+    };
+
     let rpcSources = #Default(#Mainnet);
     let rpcConfig : ?SolRpcClient.RpcConfig = ?{
       responseConsensus = ?#Equality;
@@ -315,7 +323,22 @@ persistent actor SwapCanister {
   };
 
   /// Get SOL account info
-  public shared (_msg) func getSOLAccountInfo(solAddress : Text) : async Result.Result<?SolRpcClient.AccountInfo, Text> {
+  public shared (msg) func getSOLAccountInfo(solAddress : Text) : async Result.Result<?SolRpcClient.AccountInfo, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check (expensive RPC call)
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validateText(solAddress, 32, ?44)) {
+      return #err("Invalid Solana address format")
+    };
+    
     let rpcSources = #Default(#Mainnet);
     let rpcConfig : ?SolRpcClient.RpcConfig = ?{
       responseConsensus = ?#Equality;
@@ -336,7 +359,19 @@ persistent actor SwapCanister {
   };
 
   /// Get recent blockhash using getSlot and getBlock
-  public shared (_msg) func getRecentBlockhash() : async Result.Result<Text, Text> {
+  public shared (msg) func getRecentBlockhash() : async Result.Result<Text, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check (expensive RPC call)
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    
     let rpcSources = #Default(#Mainnet);
     let rpcConfig : ?SolRpcClient.RpcConfig = ?{
       responseConsensus = ?#Equality;
@@ -382,7 +417,19 @@ persistent actor SwapCanister {
   };
 
   /// Get current Solana slot
-  public shared (_msg) func getSolanaSlot() : async Result.Result<Nat64, Text> {
+  public shared (msg) func getSolanaSlot() : async Result.Result<Nat64, Text> {
+    let userId = msg.caller;
+
+    // Rate limiting check (expensive RPC call)
+    if (not rateLimiter.isAllowed(userId)) {
+      return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    
     let rpcSources = #Default(#Mainnet);
     let rpcConfig : ?SolRpcClient.RpcConfig = ?{
       responseConsensus = ?#Equality;

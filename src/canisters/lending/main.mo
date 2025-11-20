@@ -69,6 +69,13 @@ persistent actor LendingCanister {
   // Bitcoin API integration
   private let BTC_API_ENABLED : Bool = true; // Enable for regtest
   private let BTC_NETWORK : BitcoinApi.Network = #Regtest;
+  
+  // Minimum confirmations required for UTXOs (configurable per network)
+  private let MIN_CONFIRMATIONS : Nat32 = switch BTC_NETWORK {
+    case (#Mainnet) 6 : Nat32; // 6 confirmations for mainnet (standard)
+    case (#Testnet) 1 : Nat32; // 1 confirmation for testnet
+    case (#Regtest) 1 : Nat32; // 1 confirmation for regtest
+  };
 
   // Rate limiting (transient - resets on upgrade)
   private transient var rateLimiter = RateLimiter.RateLimiter(RateLimiter.LENDING_CONFIG);
@@ -287,16 +294,41 @@ persistent actor LendingCanister {
 
     if (normalizedAsset == "btc" and BTC_API_ENABLED) {
       // Validate recipient address
-      if (not BitcoinUtilsICP.validateAddress(recipientAddress, #Regtest)) {
+      if (not BitcoinUtilsICP.validateAddress(recipientAddress, BTC_NETWORK)) {
         return #err("Invalid Bitcoin address")
       };
       
-      // Estimate fee (10 satoshis per byte is a reasonable default for regtest)
-      let estimatedFeePerByte : Nat64 = 10;
+      // Get current tip height for confirmation checking
+      let canisterAddressResult = await getBitcoinDepositAddress();
+      let tipHeight = switch canisterAddressResult {
+        case (#err(_)) null;
+        case (#ok(address)) {
+          let utxosResult = await BitcoinApi.get_utxos(BTC_NETWORK, address, null);
+          switch utxosResult {
+            case (#err(_)) null;
+            case (#ok(response)) ?response.tip_height
+          }
+        }
+      };
+      
+      // Get fee estimate from Bitcoin API (or use default)
+      let feeResult = await BitcoinApi.get_median_fee_per_byte(BTC_NETWORK);
+      let estimatedFeePerByte = switch feeResult {
+        case (#err(_)) {
+          // Fallback to network-specific defaults
+          switch BTC_NETWORK {
+            case (#Mainnet) 50 : Nat64;
+            case (#Testnet) 10 : Nat64;
+            case (#Regtest) 1 : Nat64;
+          }
+        };
+        case (#ok(fee)) fee
+      };
+      
       let estimatedTxSize : Nat32 = _estimateTransactionSize(1, 2, "P2WPKH"); // Assume 1 input, 2 outputs initially
       
-      // Select UTXOs for the withdrawal
-      let utxoSelectionResult = _selectUtxos(amount, estimatedFeePerByte, estimatedTxSize);
+      // Select UTXOs for the withdrawal (with confirmation filtering)
+      let utxoSelectionResult = _selectUtxos(amount, estimatedFeePerByte, estimatedTxSize, tipHeight);
       switch utxoSelectionResult {
         case (#err(msg)) return #err(msg);
         case (#ok(selectedUtxos)) {
@@ -305,8 +337,11 @@ persistent actor LendingCanister {
           switch changeAddressResult {
             case (#err(msg)) return #err("Failed to get change address: " # msg);
             case (#ok(changeAddress)) {
-              // Build transaction
-              let txResult = buildBitcoinTransaction(selectedUtxos, recipientAddress, amount, changeAddress);
+              // Determine address type for fee estimation (use P2WPKH as default for canister addresses)
+              let addressType = "P2WPKH";
+              
+              // Build transaction with dynamic fee calculation
+              let txResult = buildBitcoinTransaction(selectedUtxos, recipientAddress, amount, changeAddress, estimatedFeePerByte, addressType);
               switch txResult {
                 case (#err(msg)) return #err("Failed to build transaction: " # msg);
                 case (#ok(tx)) {
@@ -665,9 +700,11 @@ persistent actor LendingCanister {
     totalBitcoinBalance += utxo.value
   };
 
+
   /// Sync UTXOs from Bitcoin API for canister address
   /// This function queries the Bitcoin API and updates the local UTXO tracking
   /// Should be called periodically to keep UTXO state in sync
+  /// Implements deduplication and confirmation filtering
   public shared (_msg) func syncUtxos() : async Result<(), Text> {
     if (not BTC_API_ENABLED) {
       return #err("Bitcoin integration not enabled")
@@ -678,28 +715,44 @@ persistent actor LendingCanister {
     switch addressResult {
       case (#err(msg)) #err("Failed to get canister address: " # msg);
       case (#ok(canisterAddress)) {
-        // Get UTXOs from Bitcoin API
-        let utxosResult = await BitcoinApi.get_utxos(BTC_NETWORK, canisterAddress, null);
+        // Get UTXOs from Bitcoin API with minimum confirmations filter
+        let utxosResult = await BitcoinApi.get_utxos(
+          BTC_NETWORK,
+          canisterAddress,
+          ?#MinConfirmations(MIN_CONFIRMATIONS)
+        );
         switch utxosResult {
           case (#err(msg)) #err("Failed to sync UTXOs: " # msg);
           case (#ok(utxosResponse)) {
-            // Clear existing UTXOs and rebuild from API response
-            // Note: In production, you might want to merge instead of replace
-            bitcoinUtxos := Buffer.Buffer(utxosResponse.utxos.size());
-            totalBitcoinBalance := 0;
+            // Track UTXOs from API response
+            var updatedBalance : Nat64 = 0;
+            var finalUtxos : Buffer.Buffer<UtxoInfo> = Buffer.Buffer(utxosResponse.utxos.size());
             
-            // Add all UTXOs from API response
+            // Process UTXOs from API response
             for (utxo in utxosResponse.utxos.vals()) {
-              bitcoinUtxos.add({
+              let txidBytes = Blob.toArray(utxo.outpoint.txid);
+              let vout = utxo.outpoint.vout;
+              
+              // Create UTXO info
+              let utxoInfo : UtxoInfo = {
                 outpoint = {
-                  txid = Blob.toArray(utxo.outpoint.txid);
-                  vout = utxo.outpoint.vout;
+                  txid = txidBytes;
+                  vout = vout;
                 };
                 value = utxo.value;
                 height = utxo.height;
-              });
-              totalBitcoinBalance += utxo.value
+              };
+              
+              // Add to final list and update balance
+              finalUtxos.add(utxoInfo);
+              updatedBalance += utxo.value
             };
+            
+            // Replace existing UTXOs with synced UTXOs
+            bitcoinUtxos := finalUtxos;
+            
+            // Update total balance
+            totalBitcoinBalance := updatedBalance;
             
             #ok(())
           }
@@ -711,23 +764,54 @@ persistent actor LendingCanister {
   /// Select UTXOs for spending
   /// Uses a largest-first algorithm to minimize the number of inputs
   /// Returns UTXOs that sum to at least the target amount (including estimated fees)
+  /// Filters UTXOs by minimum confirmations
   /// 
   /// Algorithm:
-  /// 1. Sort UTXOs by value (largest first) to minimize number of inputs
-  /// 2. Select UTXOs until we have enough to cover amount + fees
-  /// 3. Consider transaction size for fee calculation
+  /// 1. Filter UTXOs by minimum confirmations (if tip height available)
+  /// 2. Sort UTXOs by value (largest first) to minimize number of inputs
+  /// 3. Select UTXOs until we have enough to cover amount + fees
+  /// 4. Consider transaction size for fee calculation
   private func _selectUtxos(
     targetAmount : Nat64,
     estimatedFeePerByte : Nat64,
-    estimatedTxSize : Nat32
+    estimatedTxSize : Nat32,
+    tipHeight : ?Nat32
   ) : Result<[UtxoInfo], Text> {
     // Calculate total amount needed (target + fees)
     let estimatedFee = Nat64.fromNat(Nat32.toNat(estimatedTxSize)) * estimatedFeePerByte;
     let totalNeeded = targetAmount + estimatedFee;
     
+    // Filter UTXOs by minimum confirmations if tip height is available
+    var availableUtxos = Buffer.Buffer<UtxoInfo>(bitcoinUtxos.size());
+    switch tipHeight {
+      case null {
+        // No tip height available, use all UTXOs (assume they're confirmed)
+        for (utxo in bitcoinUtxos.vals()) {
+          availableUtxos.add(utxo)
+        }
+      };
+      case (?tip) {
+        // Filter UTXOs that meet minimum confirmation requirement
+        for (utxo in bitcoinUtxos.vals()) {
+          let confirmations = if (tip >= utxo.height) {
+            tip - utxo.height + 1
+          } else {
+            0 : Nat32
+          };
+          if (confirmations >= MIN_CONFIRMATIONS) {
+            availableUtxos.add(utxo)
+          }
+        }
+      }
+    };
+    
+    if (availableUtxos.size() == 0) {
+      return #err("No UTXOs available with sufficient confirmations. Required: " # Nat32.toText(MIN_CONFIRMATIONS))
+    };
+    
     // Sort UTXOs by value (largest first)
     let sortedUtxos = Array.sort<UtxoInfo>(
-      Buffer.toArray(bitcoinUtxos),
+      Buffer.toArray(availableUtxos),
       func(a : UtxoInfo, b : UtxoInfo) {
         if (a.value > b.value) { #greater }
         else if (a.value < b.value) { #less }
@@ -767,8 +851,8 @@ persistent actor LendingCanister {
     switch addressResult {
       case (#err(msg)) #err("Failed to get deposit address: " # msg);
       case (#ok(depositAddress)) {
-        // Get UTXOs for the deposit address (require at least 1 confirmation for regtest)
-        let utxosResult = await BitcoinApi.get_utxos(BTC_NETWORK, depositAddress, ?#MinConfirmations(1));
+        // Get UTXOs for the deposit address (require minimum confirmations based on network)
+        let utxosResult = await BitcoinApi.get_utxos(BTC_NETWORK, depositAddress, ?#MinConfirmations(MIN_CONFIRMATIONS));
         switch utxosResult {
           case (#err(msg)) #err("Failed to query UTXOs: " # msg);
           case (#ok(utxosResponse)) {
@@ -878,11 +962,14 @@ persistent actor LendingCanister {
   /// Build Bitcoin transaction from selected UTXOs
   /// This creates a transaction structure ready for signing
   /// Note: Actual transaction serialization and signing requires Bitcoin library integration
+  /// Uses dynamic fee calculation based on network and transaction size
   private func buildBitcoinTransaction(
     selectedUtxos : [UtxoInfo],
     recipientAddress : Text,
     amount : Nat64,
-    changeAddress : Text
+    changeAddress : Text,
+    feePerByte : Nat64,
+    addressType : Text
   ) : Result<{
     inputs : [UtxoInfo];
     outputs : [(Text, Nat64)]; // (address, amount) pairs
@@ -895,6 +982,16 @@ persistent actor LendingCanister {
       return #err("No UTXOs selected")
     };
     
+    // Validate recipient address format
+    if (not BitcoinUtilsICP.validateAddress(recipientAddress, BTC_NETWORK)) {
+      return #err("Invalid recipient Bitcoin address format")
+    };
+    
+    // Validate change address format
+    if (not BitcoinUtilsICP.validateAddress(changeAddress, BTC_NETWORK)) {
+      return #err("Invalid change Bitcoin address format")
+    };
+    
     // Calculate total input value
     var totalInput : Nat64 = 0;
     for (utxo in selectedUtxos.vals()) {
@@ -902,10 +999,10 @@ persistent actor LendingCanister {
     };
     
     // Estimate transaction size for fee calculation
-    // Using P2WPKH as default (most common for canister addresses)
-    let estimatedSize = _estimateTransactionSize(selectedUtxos.size(), 2, "P2WPKH"); // 2 outputs: recipient + change
-    let estimatedFeePerByte : Nat64 = 10; // 10 satoshis per byte (adjustable based on network)
-    let fee = _calculateFee(estimatedSize, estimatedFeePerByte);
+    // Estimate outputs: recipient + potential change
+    let numOutputs = if (totalInput > amount) { 2 } else { 1 }; // recipient + change if needed
+    let estimatedSize = _estimateTransactionSize(selectedUtxos.size(), numOutputs, addressType);
+    let fee = _calculateFee(estimatedSize, feePerByte);
     
     // Calculate total needed
     let totalNeeded = amount + fee;
@@ -1085,6 +1182,17 @@ persistent actor LendingCanister {
       return #err(rateLimiter.formatError(userId))
     };
 
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validatePrincipal(newAdmin)) {
+      return #err("Invalid admin principal")
+    };
+    if (Principal.isAnonymous(newAdmin)) {
+      return #err("Cannot add anonymous principal as admin")
+    };
+
     if (not isAdmin(userId)) {
       return #err("Unauthorized: Only admins can add other admins")
     };
@@ -1099,6 +1207,14 @@ persistent actor LendingCanister {
     // Rate limiting check
     if (not rateLimiter.isAllowed(userId)) {
       return #err(rateLimiter.formatError(userId))
+    };
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validatePrincipal(adminToRemove)) {
+      return #err("Invalid admin principal")
     };
 
     if (not isAdmin(userId)) {

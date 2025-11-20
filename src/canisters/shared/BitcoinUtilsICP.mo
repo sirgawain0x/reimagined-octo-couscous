@@ -179,25 +179,17 @@ module BitcoinUtilsICP {
         // Hash the public key
         let publicKeyHash = BitcoinUtils.hashPublicKey(publicKey);
         
-        // Note: versionByte is calculated but not used since BitcoinUtils.generateAddress
-        // handles network-specific encoding internally
-        let _versionByte = switch network {
-          case (#Mainnet) 0 : Nat8;
-          case (#Testnet) 111 : Nat8;
-          case (#Regtest) 111 : Nat8; // Regtest uses testnet version
-        };
-        
-        // Use BitcoinUtils to generate the address
-        let address = BitcoinUtils.generateAddress(publicKeyHash, #P2PKH);
+        // Use BitcoinUtils to generate the address with network support
+        let address = BitcoinUtils.generateAddress(publicKeyHash, #P2PKH, network);
         #ok(address)
       }
     }
   };
 
   /// Generate P2WPKH address using ECDSA public key
-  /// SegWit addresses starting with 'bc1q'
+  /// SegWit addresses starting with 'bc1q' (mainnet), 'tb1q' (testnet), or 'bcrt1q' (regtest)
   public func generateP2WPKHAddress(
-    _network : Network,
+    network : Network,
     derivationPath : DerivationPath,
     keyName : ?Text
   ) : async Result.Result<Text, Text> {
@@ -205,7 +197,7 @@ module BitcoinUtilsICP {
       case (#err(msg)) #err(msg);
       case (#ok(publicKey)) {
         let publicKeyHash = BitcoinUtils.hashPublicKey(publicKey);
-        let address = BitcoinUtils.generateAddress(publicKeyHash, #P2WPKH);
+        let address = BitcoinUtils.generateAddress(publicKeyHash, #P2WPKH, network);
         #ok(address)
       }
     }
@@ -213,8 +205,9 @@ module BitcoinUtilsICP {
 
   /// Generate P2TR key-only address using Schnorr public key
   /// Taproot address that can only be spent with a Schnorr signature
+  /// Addresses start with 'bc1p' (mainnet), 'tb1p' (testnet), or 'bcrt1p' (regtest)
   public func generateP2TRKeyOnlyAddress(
-    _network : Network,
+    network : Network,
     derivationPath : DerivationPath,
     keyName : ?Text
   ) : async Result.Result<Text, Text> {
@@ -223,7 +216,7 @@ module BitcoinUtilsICP {
       case (#ok(xOnlyPublicKey)) {
         // Schnorr public key is already x-only (32 bytes)
         // For key-only Taproot, we use it directly
-        let address = BitcoinUtils.generateAddress(xOnlyPublicKey, #P2TR);
+        let address = BitcoinUtils.generateAddress(xOnlyPublicKey, #P2TR, network);
         #ok(address)
       }
     }
@@ -232,6 +225,7 @@ module BitcoinUtilsICP {
   /// Generate P2TR address (key or script) using Schnorr public key
   /// Taproot address that can be spent with either Schnorr signature or script
   /// For now, this is the same as key-only. Script commitment requires additional Merkle tree logic
+  /// Addresses start with 'bc1p' (mainnet), 'tb1p' (testnet), or 'bcrt1p' (regtest)
   public func generateP2TRAddress(
     network : Network,
     derivationPath : DerivationPath,
@@ -254,22 +248,37 @@ module BitcoinUtilsICP {
   };
 
   /// Validate Bitcoin address format
-  /// Checks if address follows correct format for its type
+  /// Checks if address follows correct format for its type and network
   public func validateAddress(address : Text, network : Network) : Bool {
+    if (address.size() == 0) {
+      return false
+    };
+    
     // Check legacy addresses (P2PKH starts with 1, P2SH with 3)
-    if (address.size() > 0 and address.size() < 35) {
+    // These are network-agnostic in format but we validate the version byte
+    if (address.size() >= 26 and address.size() <= 35) {
       if (Text.startsWith(address, #text "1") or Text.startsWith(address, #text "3")) {
-        return true
+        // Validate using BitcoinUtils which checks version bytes
+        return BitcoinUtils.validateAddress(address)
       }
     };
     
     // Check Bech32 addresses (SegWit and Taproot)
-    // Simple check: Bech32 addresses start with network prefix + "1"
-    // For mainnet: "bc1", testnet: "tb1", regtest: "bcrt1"
+    // Network-specific prefixes:
+    // Mainnet: "bc1" (P2WPKH/P2WSH) or "bc1p" (P2TR)
+    // Testnet: "tb1" (P2WPKH/P2WSH) or "tb1p" (P2TR)
+    // Regtest: "bcrt1" (P2WPKH/P2WSH) or "bcrt1p" (P2TR), also accepts "bc1" for compatibility
     switch network {
-      case (#Mainnet) Text.startsWith(address, #text "bc1");
-      case (#Testnet) Text.startsWith(address, #text "tb1");
-      case (#Regtest) Text.startsWith(address, #text "bcrt1") or Text.startsWith(address, #text "bc1")
+      case (#Mainnet) {
+        Text.startsWith(address, #text "bc1")
+      };
+      case (#Testnet) {
+        Text.startsWith(address, #text "tb1")
+      };
+      case (#Regtest) {
+        // Regtest accepts both bcrt1 and bc1 for compatibility
+        Text.startsWith(address, #text "bcrt1") or Text.startsWith(address, #text "bc1")
+      }
     }
   };
 

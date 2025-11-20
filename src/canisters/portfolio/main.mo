@@ -9,6 +9,7 @@ import Result "mo:base/Result";
 import Text "mo:base/Text";
 import Types "../shared/Types";
 import RateLimiter "../shared/RateLimiter";
+import InputValidation "../shared/InputValidation";
 
 persistent actor PortfolioCanister {
   type PortfolioAsset = Types.PortfolioAsset;
@@ -68,6 +69,17 @@ persistent actor PortfolioCanister {
       return #err(rateLimiter.formatError(userId))
     };
 
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validatePrincipal(canisterId)) {
+      return #err("Invalid canister principal")
+    };
+    if (Principal.isAnonymous(canisterId)) {
+      return #err("Cannot set anonymous principal as canister ID")
+    };
+
     rewardsCanisterId := ?canisterId;
     #ok(())
   };
@@ -81,12 +93,34 @@ persistent actor PortfolioCanister {
       return #err(rateLimiter.formatError(userId))
     };
 
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    if (not InputValidation.validatePrincipal(canisterId)) {
+      return #err("Invalid canister principal")
+    };
+    if (Principal.isAnonymous(canisterId)) {
+      return #err("Cannot set anonymous principal as canister ID")
+    };
+
     lendingCanisterId := ?canisterId;
     #ok(())
   };
 
   /// Get user's complete portfolio
   public func getPortfolio(userId : Principal) : async Portfolio {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      // Return empty portfolio for invalid principal
+      return {
+        totalValue = 0.0;
+        totalRewards = 0;
+        totalLended = 0.0;
+        assets = [];
+      }
+    };
+    
     var totalRewards : Nat64 = 0;
     var totalLended : Float = 0.0;
     var assetBalances : HashMap.HashMap<Text, Nat64> = HashMap.HashMap(0, Text.equal, Text.hash);
@@ -96,8 +130,13 @@ persistent actor PortfolioCanister {
     switch (rewardsOpt) {
       case null {};
       case (?rewardsCanister) {
-        // If canister call fails, it will propagate - caller should handle
-        totalRewards := await rewardsCanister.getUserRewards(userId)
+        // If canister call fails, continue with 0 rewards (graceful degradation)
+        try {
+          totalRewards := await rewardsCanister.getUserRewards(userId)
+        } catch (_) {
+          // Cross-canister call failed - continue with 0 rewards
+          totalRewards := 0
+        }
       }
     };
 
@@ -106,18 +145,22 @@ persistent actor PortfolioCanister {
     switch (lendingOpt) {
       case null {};
       case (?lendingCanister) {
-        // If canister call fails, it will propagate - caller should handle
-        let deposits = await lendingCanister.getUserDeposits(userId);
-        for (deposit in deposits.vals()) {
-          // Calculate total lended in USD
-          let price = getPrice(deposit.asset);
-          let amountFloat = Float.fromInt(Nat64.toNat(deposit.amount)) / 100_000_000.0; // Convert from 8 decimals
-          totalLended := totalLended + amountFloat * price;
+        // If canister call fails, continue with empty deposits (graceful degradation)
+        try {
+          let deposits = await lendingCanister.getUserDeposits(userId);
+          for (deposit in deposits.vals()) {
+            // Calculate total lended in USD
+            let price = getPrice(deposit.asset);
+            let amountFloat = Float.fromInt(Nat64.toNat(deposit.amount)) / 100_000_000.0; // Convert from 8 decimals
+            totalLended := totalLended + amountFloat * price;
 
-          // Aggregate asset balances
-          let currentBalance = assetBalances.get(deposit.asset);
-          let newBalance = Option.get<Nat64>(currentBalance, 0) + deposit.amount;
-          assetBalances.put(deposit.asset, newBalance)
+            // Aggregate asset balances
+            let currentBalance = assetBalances.get(deposit.asset);
+            let newBalance = Option.get<Nat64>(currentBalance, 0) + deposit.amount;
+            assetBalances.put(deposit.asset, newBalance)
+          }
+        } catch (_) {
+          // Cross-canister call failed - continue with empty deposits
         }
       }
     };
@@ -153,19 +196,32 @@ persistent actor PortfolioCanister {
 
   /// Get balance for specific asset
   public func getBalance(userId : Principal, asset : Text) : async Nat64 {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return 0
+    };
+    if (not InputValidation.validateText(asset, 1, ?10)) {
+      return 0
+    };
+    
     let lendingOpt = getLendingCanister();
     switch (lendingOpt) {
       case null 0;
       case (?lendingCanister) {
-        // If canister call fails, it will propagate - caller should handle
-        let deposits = await lendingCanister.getUserDeposits(userId);
-        var balance : Nat64 = 0;
-        for (deposit in deposits.vals()) {
-          if (deposit.asset == asset) {
-            balance := balance + deposit.amount
-          }
-        };
-        balance
+        // If canister call fails, return 0 (graceful degradation)
+        try {
+          let deposits = await lendingCanister.getUserDeposits(userId);
+          var balance : Nat64 = 0;
+          for (deposit in deposits.vals()) {
+            if (deposit.asset == asset) {
+              balance := balance + deposit.amount
+            }
+          };
+          balance
+        } catch (_) {
+          // Cross-canister call failed - return 0
+          0
+        }
       }
     }
   };
