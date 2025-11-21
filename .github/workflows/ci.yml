@@ -132,7 +132,14 @@ jobs:
 
       - name: Install Motoko Package Manager (mops)
         run: |
-          wget https://github.com/dfinity/mops/releases/latest/download/mops-x86_64-linux -O /tmp/mops
+          # Get the latest release download URL using GitHub API
+          MOPS_URL=$(curl -s https://api.github.com/repos/dfinity/mops/releases/latest | grep "browser_download_url.*mops-x86_64-linux" | cut -d '"' -f 4)
+          if [ -z "$MOPS_URL" ]; then
+            echo "Failed to find mops download URL"
+            exit 1
+          fi
+          echo "Downloading mops from: $MOPS_URL"
+          wget -q "$MOPS_URL" -O /tmp/mops
           chmod +x /tmp/mops
           sudo mv /tmp/mops /usr/local/bin/mops
 
