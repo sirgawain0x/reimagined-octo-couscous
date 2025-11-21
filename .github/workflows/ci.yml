@@ -126,7 +126,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup dfx
-        uses: dfinity/setup-dfx@v0.3.0
+        uses: dfinity/setup-dfx@main
         with:
           version: '0.20.0'
 
