@@ -39,7 +39,7 @@ export function useSolana(): UseSolanaResult {
       )
 
       const result = await retryWithTimeout(
-        () => canister.getSolanaAddress(null),
+        () => canister.getSolanaAddress(undefined),
         30000,
         { maxRetries: 3, initialDelayMs: 1000 }
       ) as { ok: string; err?: string } | { ok?: string; err: string }
@@ -47,12 +47,30 @@ export function useSolana(): UseSolanaResult {
       if ("ok" in result && result.ok) {
         setAddress(result.ok)
       } else if ("err" in result && result.err) {
-        setError(result.err)
-        logError("Failed to get Solana address", new Error(result.err))
+        // Filter out technical Candid errors that users won't understand
+        const isTechnicalError = result.err.toLowerCase().includes("invalid opt") ||
+                                 result.err.toLowerCase().includes("candid decode") ||
+                                 result.err.toLowerCase().includes("type mismatch")
+        
+        if (isTechnicalError) {
+          // Don't set error for technical issues - they're confusing to users
+          // Still log for debugging
+          logError("Technical error getting Solana address (hidden from user)", new Error(result.err))
+        } else {
+          setError(result.err)
+          logError("Failed to get Solana address", new Error(result.err))
+        }
       }
     } catch (error) {
       const err = error as Error
-      setError(err.message)
+      // Filter out technical Candid errors
+      const isTechnicalError = err.message.toLowerCase().includes("invalid opt") ||
+                               err.message.toLowerCase().includes("candid decode") ||
+                               err.message.toLowerCase().includes("type mismatch")
+      
+      if (!isTechnicalError) {
+        setError(err.message)
+      }
       logError("Error getting Solana address", err)
     } finally {
       setIsLoading(false)
@@ -84,12 +102,27 @@ export function useSolana(): UseSolanaResult {
       if ("ok" in result && result.ok !== undefined) {
         setBalance(result.ok)
       } else if ("err" in result && result.err) {
-        setError(result.err)
-        logError("Failed to get SOL balance", new Error(result.err))
+        // Filter out technical Candid errors
+        const isTechnicalError = result.err.toLowerCase().includes("invalid opt") ||
+                                 result.err.toLowerCase().includes("candid decode") ||
+                                 result.err.toLowerCase().includes("type mismatch")
+        
+        if (!isTechnicalError) {
+          setError(result.err)
+          logError("Failed to get SOL balance", new Error(result.err))
+        } else {
+          logError("Technical error getting SOL balance (hidden from user)", new Error(result.err))
+        }
       }
     } catch (error) {
       const err = error as Error
-      setError(err.message)
+      const isTechnicalError = err.message.toLowerCase().includes("invalid opt") ||
+                               err.message.toLowerCase().includes("candid decode") ||
+                               err.message.toLowerCase().includes("type mismatch")
+      
+      if (!isTechnicalError) {
+        setError(err.message)
+      }
       logError("Error getting SOL balance", err)
     } finally {
       setIsLoading(false)
@@ -117,7 +150,7 @@ export function useSolana(): UseSolanaResult {
       )
 
       const result = await retryWithTimeout(
-        () => canister.sendSOL(toAddress, amountLamports, null),
+        () => canister.sendSOL(toAddress, amountLamports, undefined),
         60000, // 60 second timeout for transaction sending
         { maxRetries: 3, initialDelayMs: 1000 }
       ) as { ok: string; err?: string } | { ok?: string; err: string }

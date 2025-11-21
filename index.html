@@ -4,7 +4,26 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ICP Shopping Rewards - Earn Bitcoin While You Shop</title>
+    <!-- Content Security Policy -->
+    <!-- Note: frame-ancestors can only be set via HTTP headers, not meta tags -->
+    <!-- For ICP deployments, CSP headers are configured via .ic-assets.json -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self' 'unsafe-inline' 'unsafe-eval' https://identity.ic0.app https://*.ic0.app;
+        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+        font-src 'self' https://fonts.gstatic.com data:;
+        img-src 'self' data: https: blob:;
+        connect-src 'self' https://*.ic0.app https://identity.ic0.app https://ic0.app http://localhost:* ws://localhost:* wss://localhost:* https://*.validationcloud.io chrome-extension: moz-extension:;
+        frame-src 'self' https://identity.ic0.app https://*.ic0.app;
+        object-src 'none';
+        base-uri 'self';
+        form-action 'self';
+        upgrade-insecure-requests;
+      "
+    />
+    <title>BitRewards - Earn Bitcoin While You Shop</title>
   </head>
   <body>
     <div id="root"></div>

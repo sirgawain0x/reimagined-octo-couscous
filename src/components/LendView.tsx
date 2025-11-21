@@ -1,9 +1,12 @@
 import { useState } from "react"
+import { Lock } from "lucide-react"
 import { useLending } from "@/hooks/useLending"
+import { useICP } from "@/hooks/useICP"
 import { logError } from "@/utils/logger"
 
 function LendView() {
   const { assets, deposits, isLoading, deposit } = useLending()
+  const { isConnected } = useICP()
   const [lendAmount, setLendAmount] = useState<Record<string, string>>({})
   const [isProcessing, setIsProcessing] = useState<string | null>(null)
 
@@ -35,6 +38,27 @@ function LendView() {
     return (
       <div className="animate-fade-in flex items-center justify-center min-h-[400px]">
         <div className="text-gray-400">Loading lending assets...</div>
+      </div>
+    )
+  }
+
+  if (!isConnected) {
+    return (
+      <div className="animate-fade-in flex items-center justify-center min-h-[400px]">
+        <div className="bg-gray-800 rounded-xl shadow-lg p-8 max-w-md text-center">
+          <div className="flex justify-center mb-4">
+            <div className="bg-yellow-500/20 p-4 rounded-full">
+              <Lock className="h-12 w-12 text-yellow-400" />
+            </div>
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Connect Your Wallet</h2>
+          <p className="text-gray-400 mb-4">
+            Please connect your Internet Identity or Bitcoin wallet to start lending and earning interest.
+          </p>
+          <p className="text-sm text-gray-500">
+            Use the connection buttons in the header to sign in.
+          </p>
+        </div>
       </div>
     )
   }

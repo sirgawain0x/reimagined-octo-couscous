@@ -10,11 +10,12 @@ interface HeaderProps {
   onNavigate: (view: View) => void
   isConnected: boolean
   onConnect: (method?: AuthMethod) => Promise<void>
+  onBitcoinConnect?: (principal: Principal) => void
   onDisconnect: () => Promise<void>
   principal: Principal | null
 }
 
-function Header({ currentView, onNavigate, isConnected, onConnect, onDisconnect, principal }: HeaderProps) {
+function Header({ currentView, onNavigate, isConnected, onConnect, onBitcoinConnect, onDisconnect, principal }: HeaderProps) {
   const [connectDialogOpen, setConnectDialogOpen] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -74,8 +75,11 @@ function Header({ currentView, onNavigate, isConnected, onConnect, onDisconnect,
 
   function handleBitcoinConnect(principal: Principal) {
     // The ConnectDialog handles the Bitcoin wallet connection
-    // This callback can be used to update the connection state
-    if (principal) {
+    // This callback directly updates the connection state with the principal we already have
+    if (principal && onBitcoinConnect) {
+      onBitcoinConnect(principal)
+    } else if (principal) {
+      // Fallback: if onBitcoinConnect not provided, use the regular connect method
       onConnect("bitcoin")
     }
   }

@@ -31,6 +31,7 @@ describe('usePortfolio', () => {
       totalValue: 12450.75,
       totalRewards: BigInt(1250000), // 0.0125 BTC in nat64
       totalLended: 8000.0,
+      totalBorrowed: 2000.0,
       assets: [
         { name: 'Bitcoin', symbol: 'BTC', amount: BigInt(1500000000), value: 9000.5 }, // 0.15 BTC
         { name: 'Ethereum', symbol: 'ETH', amount: BigInt(100000000), value: 3000.25 }, // 1.0 ETH
@@ -47,6 +48,7 @@ describe('usePortfolio', () => {
     expect(result.current.portfolio).toBeDefined()
     expect(result.current.portfolio?.totalValue).toBe(12450.75)
     expect(result.current.portfolio?.totalRewards).toBe(0.0125)
+    expect(result.current.portfolio?.totalBorrowed).toBe(2000.0)
     expect(result.current.portfolio?.assets.length).toBe(2)
   })
 
@@ -79,6 +81,7 @@ describe('usePortfolio', () => {
     // Should have empty portfolio on error
     expect(result.current.portfolio).toBeDefined()
     expect(result.current.portfolio?.totalValue).toBe(0)
+    expect(result.current.portfolio?.totalBorrowed).toBe(0)
     expect(result.current.portfolio?.assets.length).toBe(0)
     expect(result.current.error).toBeDefined()
   })
@@ -115,6 +118,7 @@ describe('usePortfolio', () => {
       totalValue: 1000,
       totalRewards: BigInt(0),
       totalLended: 500,
+      totalBorrowed: 100,
       assets: [],
     }
     mockActor.getPortfolio.mockResolvedValue(mockPortfolio)
@@ -135,6 +139,7 @@ describe('usePortfolio', () => {
       totalValue: 1000,
       totalRewards: BigInt(100000000), // 1.0 BTC in nat64
       totalLended: 500,
+      totalBorrowed: 200,
       assets: [
         { name: 'Bitcoin', symbol: 'BTC', amount: BigInt(500000000), value: 1000 }, // 0.5 BTC
       ],
@@ -148,7 +153,53 @@ describe('usePortfolio', () => {
     })
 
     expect(result.current.portfolio?.totalRewards).toBe(1.0)
+    expect(result.current.portfolio?.totalBorrowed).toBe(200)
     expect(result.current.portfolio?.assets[0].amount).toBe(0.5)
+  })
+
+  it('should handle totalBorrowed calculation correctly', async () => {
+    const mockPortfolio = {
+      totalValue: 5000, // assets + rewards + lended - borrowed
+      totalRewards: BigInt(0),
+      totalLended: 3000,
+      totalBorrowed: 1500, // Should be subtracted from total value
+      assets: [
+        { name: 'Bitcoin', symbol: 'BTC', amount: BigInt(500000000), value: 3500 }, // 0.5 BTC
+      ],
+    }
+    mockActor.getPortfolio.mockResolvedValue(mockPortfolio)
+
+    const { result } = renderHook(() => usePortfolio())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    expect(result.current.portfolio?.totalBorrowed).toBe(1500)
+    expect(result.current.portfolio?.totalValue).toBe(5000)
+    // Verify net value calculation: 3500 (assets) + 0 (rewards) + 3000 (lended) - 1500 (borrowed) = 5000
+  })
+
+  it('should handle zero borrowed amount', async () => {
+    const mockPortfolio = {
+      totalValue: 10000,
+      totalRewards: BigInt(0),
+      totalLended: 5000,
+      totalBorrowed: 0,
+      assets: [
+        { name: 'Bitcoin', symbol: 'BTC', amount: BigInt(1000000000), value: 5000 }, // 1.0 BTC
+      ],
+    }
+    mockActor.getPortfolio.mockResolvedValue(mockPortfolio)
+
+    const { result } = renderHook(() => usePortfolio())
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    expect(result.current.portfolio?.totalBorrowed).toBe(0)
+    expect(result.current.portfolio?.totalValue).toBe(10000)
   })
 })
 

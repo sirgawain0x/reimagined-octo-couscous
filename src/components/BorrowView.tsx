@@ -1,9 +1,12 @@
 import { useState } from "react"
+import { Lock } from "lucide-react"
 import { useLending } from "@/hooks/useLending"
+import { useICP } from "@/hooks/useICP"
 import { logError } from "@/utils/logger"
 
 function BorrowView() {
   const { assets, deposits, borrows, availableLiquidity, isLoading, borrow, repay } = useLending()
+  const { isConnected } = useICP()
   const [borrowAmount, setBorrowAmount] = useState<Record<string, string>>({})
   const [collateralAmount, setCollateralAmount] = useState<Record<string, string>>({})
   const [collateralAsset, setCollateralAsset] = useState<Record<string, string>>({})
@@ -95,6 +98,27 @@ function BorrowView() {
     return (
       <div className="animate-fade-in flex items-center justify-center min-h-[400px]">
         <div className="text-gray-400">Loading borrowing assets...</div>
+      </div>
+    )
+  }
+
+  if (!isConnected) {
+    return (
+      <div className="animate-fade-in flex items-center justify-center min-h-[400px]">
+        <div className="bg-gray-800 rounded-xl shadow-lg p-8 max-w-md text-center">
+          <div className="flex justify-center mb-4">
+            <div className="bg-red-500/20 p-4 rounded-full">
+              <Lock className="h-12 w-12 text-red-400" />
+            </div>
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Connect Your Wallet</h2>
+          <p className="text-gray-400 mb-4">
+            Please connect your Internet Identity or Bitcoin wallet to borrow against your collateral.
+          </p>
+          <p className="text-sm text-gray-500">
+            Use the connection buttons in the header to sign in.
+          </p>
+        </div>
       </div>
     )
   }

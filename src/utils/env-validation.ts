@@ -78,13 +78,9 @@ export function validateEnvironment(): { valid: boolean; errors: ValidationError
     validateCanisterId(ICP_CONFIG.canisterIds.swap, "VITE_CANISTER_ID_SWAP", "Swap")
   }
 
-  // Internet Identity URL should always be set
-  if (!ICP_CONFIG.internetIdentityUrl) {
-    errors.push({
-      variable: "VITE_INTERNET_IDENTITY_URL",
-      message: "Internet Identity URL is required",
-    })
-  }
+  // Internet Identity URL is optional - Bitcoin wallet authentication is an alternative
+  // Only warn if neither authentication method is clearly configured
+  // (This validation is informational, not blocking)
 
   return {
     valid: errors.length === 0,

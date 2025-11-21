@@ -1,0 +1,569 @@
+---
+description: When building an application that enables users to have profiles or buy and sell assets, you must implement an authentication method.
+alwaysApply: false
+---
+When building an application that enables users to have profiles or buy and sell assets, you must implement an authentication method. An authentication method allows users to log into an application by providing some form of credential or verification of identity. Authentication methods vary in levels of security and data privacy.
+
+To implement authentication in your dapp, your application frontend must provide a user interface component that triggers an authentication workflow. Then, the backend logic must implement code to handle the authentication and return a response to the frontend service.
+
+A simple example of this workflow is a basic 'Who am I?' application that uses Internet Identity for authentication. View the integrating with Internet Identity documentation for more information.
+
+Authentication methods
+Authentication methods available on ICP include:
+
+Internet Identity: ICP's native identity service that uses a cryptographic public/private key pair for authentication.
+
+Email and password: Authentication with an email and password.
+
+NFID: A digital form of identity that allows users to use an email and password or their Google account.
+
+ic-auth: A modular tool to integrate wallet providers into ICP apps. Supports Stoic, Plug, Internet Identity, and NFID.
+
+Plug wallet: An in-browser wallet for managing all ICP assets such as cycles, ICP, tokens, and NFTs.
+
+The following tools enable authenticating with ICP dapps using wallet addresses from other chains and ecosystems:
+
+Sign in with Bitcoin: An authentication standard that enables Bitcoin wallet-based authentication for ICP applications.
+
+Sign in with Ethereum: An authentication standard that enables Ethereum wallet-based authentication for ICP applications.
+
+Sign in with Solana: An authentication standard that enables Solana wallet-based authentication for ICP applications.
+
+MSQ library: A client library for dapps to enable user interaction with ICP solely via their existing MetaMask wallet using the Metamask Snaps feature.
+
+Integrating Internet Identity
+Intermediate
+Tutorial
+This guide demonstrates an example of how to integrate Internet Identity as an application authentication service. In this example, a user can interact with the application's website to log in with their identity and then call a backend canister's function whose behavior depends on the identity of the caller.
+
+For simplicity, we use the whoami function that simply returns the caller's principal. (While real-world use cases for Internet Identity are out of scope of this guide, note that the most common use case is authentication, for example, letting the backend process certain requests only from an authorized caller while rejecting calls from everyone else.)
+
+Prerequisites
+ Install the IC SDK.
+You can open this project in ICP Ninja, a web-based IDE for temporary project deployments, or clone the "Who am I?" sample from GitHub. Keep reading if you want to develop locally from scratch or extend an existing project with an Internet Identity integration.
+
+Step 1: Get an ICP dapp project.
+You may either create a new project or open an existing project.
+
+To crete a new project:
+
+Motoko
+Rust
+dfx new internet_identity_app --type=motoko --frontend react --extras internet-identity
+cd internet_identity_app
+
+
+The --extras flag will add the pullable version of the Internet Identity canister to your project. A pullable canister is a canister that provides a public service at a static canister ID. Learn more about pullable canisters.
+
+For a new project, add the follwoing canister configuration to the project's dfx.json file:
+
+Motoko
+Rust
+motoko/who_am_i/dfx.json
+{
+  "canisters": {
+    "internet_identity_app_backend": {
+      "main": "src/internet_identity_app_backend/main.mo",
+      "type": "motoko",
+      "args": "--enhanced-orthogonal-persistence"
+    },
+    "internet_identity_app_frontend": {
+      "dependencies": ["internet_identity_app_backend"],
+      "internet_identity_app_frontend": {
+        "entrypoint": "src/internet_identity_app_frontend/index.html"
+      },
+      "source": ["src/internet_identity_app_frontend/dist"],
+      "type": "assets"
+    },
+    "internet_identity": {
+      "candid": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity.did",
+      "type": "custom",
+      "init_arg": "(opt record { new_flow_origins = opt vec { \"http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943\" } })",
+      "specified_id": "rdmx6-jaaaa-aaaaa-aaadq-cai",
+      "remote": {
+        "id": {
+          "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+        }
+      },
+      "wasm": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity_dev.wasm.gz"
+    }
+  },
+  "output_env_file": ".env",
+  "defaults": {
+    "build": {
+      "packtool": "mops sources"
+    }
+  }
+}
+
+See full example on GitHub
+If you already have a project that was not created with the extra Internet Identity feature, you can modify the project to use the pullable Internet Identity canister.
+
+In this tutorial, we use frontend code that assumes that the Internet Identity canister is installed with ID rdmx6-jaaaa-aaaaa-aaadq-cai, the same ID as this canister has on the mainnet. To ensure the correct Internet Identity canister ID, be sure to add "specified_id": "rdmx6-jaaaa-aaaaa-aaadq-cai" to your .canisters.internet_identity section in dfx.json.
+
+Step 2: Edit backend code.
+To add a simple "Who am I?" function, insert the following code into the backend canister's source code file:
+
+Motoko
+Rust
+motoko/who_am_i/src/internet_identity_app_backend/main.mo
+import Principal "mo:base/Principal";
+
+persistent actor Whoami {
+  public query (message) func whoami() : async Principal {
+    message.caller;
+  };
+};
+
+See full example on GitHub
+Compiling this Motoko code requires the Mops package manager.
+
+So make sure the project has a mops.toml file in its root.
+
+If not, install Mops and simply run the following command to initialize mops.toml:
+
+mops init -y
+
+Step 3: Edit frontend code.
+In the frontend canister code, add a method to the App class to call the backend function and initialize the auth client:
+
+motoko/who_am_i/src/internet_identity_app_frontend/src/App.jsx
+import React, { useState, useEffect } from 'react';
+import { AuthClient } from '@dfinity/auth-client';
+import { createActor } from 'declarations/internet_identity_app_backend';
+import { canisterId } from 'declarations/internet_identity_app_backend/index.js';
+
+const network = process.env.DFX_NETWORK;
+const identityProvider =
+  network === 'ic'
+    ? 'https://id.ai/' // Mainnet
+    : 'http://rdmx6-jaaaa-aaaaa-aaadq-cai.localhost:4943'; // Local
+
+// Reusable button component
+const Button = ({ onClick, children }) => <button onClick={onClick}>{children}</button>;
+
+const App = () => {
+  const [state, setState] = useState({
+    actor: undefined,
+    authClient: undefined,
+    isAuthenticated: false,
+    principal: 'Click "Whoami" to see your principal ID'
+  });
+
+  // Initialize auth client
+  useEffect(() => {
+    updateActor();
+  }, []);
+
+  const updateActor = async () => {
+    const authClient = await AuthClient.create();
+    const identity = authClient.getIdentity();
+    const actor = createActor(canisterId, {
+      agentOptions: {
+        identity
+      }
+    });
+    const isAuthenticated = await authClient.isAuthenticated();
+
+    setState((prev) => ({
+      ...prev,
+      actor,
+      authClient,
+      isAuthenticated
+    }));
+  };
+
+  const login = async () => {
+    await state.authClient.login({
+      identityProvider,
+      onSuccess: updateActor
+    });
+  };
+
+  const logout = async () => {
+    await state.authClient.logout();
+    updateActor();
+  };
+
+  const whoami = async () => {
+    setState((prev) => ({
+      ...prev,
+      principal: 'Loading...'
+    }));
+
+    const result = await state.actor.whoami();
+    const principal = result.toString();
+    setState((prev) => ({
+      ...prev,
+      principal
+    }));
+  };
+
+  return (
+    <div>
+      <h1>Who Am I?</h1>
+      <div id="info-box" className="info-box">
+        <div className="info-content">
+          <p>
+            <i className="fas fa-info-circle"></i> A <strong>principal</strong> is a unique identifier in the Internet
+            Computer ecosystem.
+          </p>
+          <p>
+            It represents an entity (user, canister smart contract, or other) and is used for identification and
+            authorization purposes.
+          </p>
+          <p>
+            In this example, click "Whoami" to find out the principal ID with which you're interacting with the backend.
+            If you're not signed in, you will see that you're using the so-called anonymous principal, "2vxsx-fae".
+          </p>
+          <p>
+            After you've logged in with Internet Identity, you'll see a longer principal, which is unique to your
+            identity and the dapp you're using.
+          </p>
+        </div>
+      </div>
+
+      {!state.isAuthenticated ? (
+        <Button onClick={login}>Login with Internet Identity</Button>
+      ) : (
+        <Button onClick={logout}>Logout</Button>
+      )}
+
+      <Button onClick={whoami}>Whoami</Button>
+
+      {state.principal && (
+        <div>
+          <h2>Your principal ID is:</h2>
+          <h4>{state.principal}</h4>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;
+
+See full example on GitHub
+Make sure to always create a single AuthClient instance on page load and reuse it within your click handlers.
+
+Install the required npm package:
+
+cd src/internet_identity_app_frontend
+npm install @dfinity/auth-client@^3.0.0
+cd ../..
+
+Make sure that all @dfinity/<package> dependencies in package.json are the same version.
+
+Step 4
+Make sure you have a local development environment:
+
+dfx start --clean --background
+
+If you see the error Error: dfx is already running, that's fine, it just means that your local development environment is ready.
+
+Sometimes you might see a local network port being occupied by another process, preventing dfx from being able to bind the local network to that local port. To diagnose which process is occupying a particular port number, e.g., 1234, run lsof -i :1234 (the actual port number will be reported in the error from the dfx start command).
+
+Step 5: Deploy the application:
+dfx deploy
+
+If you see an error, e.g., Canister rdmx6-jaaaa-aaaaa-aaadq-cai is already installed. this means your local development environment needs to be restarted:
+
+dfx stop
+
+Once the above command finishes, go back to Step 4.
+
+Open the frontend URL that is returned in the deployment output. Your dapp's frontend will be displayed.
+
+If you are developing using the Safari web browser, you need to change the value returned for the local development environment to http://localhost:4943?canisterId=<canister_id>.
+
+Click the "Login" button. You'll be redirected to the Internet Identity frontend. Since you're running this locally, you will be using a local, non-production Internet Identity. To create one, follow the on-screen steps.
+
+Click the "Who am I" button and it should return your Internet Identity principal:
+
+Your principal is: 5uylz-j7fcd-isj73-gp57f-xwwyy-po2ib-7iboa-fdkdv-nrsam-3bd3r-qqe
+
+The above principal is an example. The principal returned will be different based on the account and the environment where the application and Internet Identity are running.
+
+Local frontend development
+When modifying this example's frontend, it is recommended to develop using a local development server instead of using the deployed frontend canister. This is because using a local development server will enable Hot Module Reloading, allowing you to see any modifications made to your frontend instantaneously, rather than having to redeploy the frontend canister to see the changes.
+
+To start a local development server, run npm run start. The output will contain the local address the project is running at, such as 127.0.0.1:4943.
+
+Resources
+Internet Identity dashboard.
+Internet Identity specification.
+Internet Identity GitHub repository.
+Internet Identity alternative frontend origins.
+
+Integrating with other authentication services
+Intermediate
+Tutorial
+Integrate with Plug wallet
+Plug wallet uses Secp256k1 as its key algorithm. To integrate Plug wallet authentication into your dapp, you can use the @dfinity/identity-secp256k1 and a PEM file:
+
+import { Secp256k1KeyIdentity } from '@dfinity/identity-secp256k1';
+
+const identity = Secp256k1KeyIdentity.fromPem(pemFileContentString);
+
+Alternative frontend origins
+Intermediate
+Authentication
+If your application has reached the stage where you want to change domain names, and you have been authenticating with Internet Identity (II), you will want to make sure that your users can seamlessly keep the same principals they have already been using. To support this functionality, you can configure your application for alternative frontend origins using this guide.
+
+You may need this guide if you are doing any of the following:
+
+Moving from <canister-id>.icp0.io to a custom domain.
+Asking users to log in at /login instead of /.
+Supporting users using raw.icp0.io.
+Configuring multiple apps in your organization to use the same principals.
+Constraints
+Currently, a maximum of 10 alternative origins can be listed.
+
+Internet Identity will only follow this specification when the origin configuring these alternatives is hosted on a canister using certified assets.
+
+For more information, see the Internet Identity specification.
+
+Configuring alternative origins
+For this example, you will have two domains, A and B. A will be the derivation origin, and B will be the alternative domain. To help illustrate this model, consider this website, which is hosted both at https://xxxxx.icp0.io and https://www.yourcustomdomain.com.
+
+In this example, A would be https://xxxxx.icp0.io.
+
+B would be the alternative origin, or https://www.yourcustomdomain.com.
+
+Setting the derivation origin
+If you are using Internet Identity, you are probably using AuthClient. Therefore, on the code for the B origin, you need to set the derivationOrigin to the AuthClient to A.
+
+const authClient = await AuthClient.login({
+  //...
+  derivationOrigin: "https://xxxxx.icp0.io",
+});
+
+Note that for the AuthClient on A the field derivationOrigin can be omitted.
+
+For more details about the login options in the AuthClient, see its documentation.
+
+Listing alternative origins
+On origin A, you need to provide an endpoint .well-known/ii-alternative-origins that tells Internet Identity that B is a valid alternative origin.
+
+The response of this endpoint must be a valid JSON object with an alternativeOrigins key, containing an array of strings:
+
+{
+  "alternativeOrigins": ["https://www.yourcustomdomain.com"]
+}
+
+Requirements:
+
+Maximum of 10 alternative origins can be listed.
+No trailing slash or paths should appear in the URL.
+Order doesn't matter.
+Note that there is no need to have .well-known/ii-alternative-origins on origin B.
+
+Asset canister
+Most developers implement their frontend applications using the Asset Canister. Therefore, we provide a tutorial on how to set up the alternative origins endpoint with it.
+
+Adding the ii-alternative-origins config file
+If your frontend canister is currently configured to deploy assets from a dist folder, make sure to update the sources for your canister to include both:
+
+dfx.json
+"source": [
+    "dist",
+    "src/assets"
+]
+
+Inside of src/assets, create a .well-known folder, and add a file named ii-alternative-origins.
+
+The file needs to be exactly named ii-alternative-origins, with no file extension. The content inside will be formatted as JSON, but the file should not end with .json.
+
+Inside of the file, list your alternative origins for A, which is B in our example. It will look something like this:
+
+src/assets/.well-known/ii-alternative-origins
+{
+  "alternativeOrigins": ["https://www.yourcustomdomain.com"]
+}
+
+Now, your project should look something like this:
+
+├── dfx.json
+├── src
+│   ├── assets
+│   │   ├── .well-known
+│   │   │   └── ii-alternative-origins
+
+Configuring your frontend canister
+Because the dot syntax in .well-known ordinarily will be treated as "hidden" by the file system, the frontend canister will need to be configured to upload your document. To configure the frontend canister, create a new file, .ic-assets.json. .ic-assets.json needs to be placed inside a directory listed in sources for your canister, so you can use src/assets again. Your new list of files should look like this:
+
+├── dfx.json
+├── package.json
+├── src
+│   ├── project_frontend
+│   │   ├── src
+│   │   │   ├── .ic-assets.json
+│   │   │   ├── .well-known
+│   │   │   │   └── ii-alternative-origins
+
+Then, configure the .well-known directory to be included with:
+
+src/project_frontend/src/.ic-assets.json
+[
+  {
+    "match": ".well-known",
+    "ignore": false
+  },
+  {
+    "match": ".well-known/ii-alternative-origins",
+    "headers": {
+      "Access-Control-Allow-Origin": "*",
+      "Content-Type": "application/json"
+    },
+    "ignore": false
+  }
+]
+
+This includes a general rule to not ignore the .well-known directory and rules to deliver the ii-alternative-origins with access control and content-type headers.
+
+Now, all you need to do is deploy your canisters (both A and B).
+
+From now on, when you attempt to authenticate from origin B, you will get back the same principal you get while using A.
+
+For more information, see the Internet Identity specification for Alternative Origins.
+
+Verifying signatures
+Intermediate
+Signatures
+Every call made on ICP requires a cryptographic Signature and Principal. These are typically attached in the form of an identity that can either be authenticated or anonymous. An identity includes both the private and public keys. The public key is sent along with the identity that is encoded as a Principal and signed with a Signature. Canisters use this identity to respond to the call and process authentication-based workflows. When a delegation identity is sent, the same workflow is used, except a delegation chain is included as well.
+
+For some workflows, it can be beneficial to verify the identity's signature independently from the automatic verification done on ICP as an additional layer of validation.
+
+When a canister call is made via the HTTPS interface, the following fields are present:
+
+nonce (blob, optional): Randomly generated user-provided data; can be used to create distinct calls with otherwise identical fields.
+
+ingress_expiry (nat, required): An upper limit on the call's validity, expressed in nanoseconds, which avoids replay attacks since ICP will not accept calls or transition calls if their expiry date is in the past. Additionally, calls may be refused with an ingress expiry date too far in the future.
+
+sender (Principal, required): The entity who issued the call.
+
+The call's authentication includes the following fields:
+
+content (record): The call's content.
+
+sender_pubkey (blob, optional): The public key used to authenticate the call.
+
+sender_delegation (array of maps, optional): A chain of delegations that begins with one signed by the sender_pubkey and ends with the delegation to the key relating to the sender_sig; every public key should appear exactly once.
+
+sender_sig (blob, optional): The signature used to authenticate the call.
+
+The public key must authenticate the sender principal if the principal is a self-authenticating ID that is derived from that public key.
+
+The fields sender_pubkey, sender_sig, and sender_delegation should be omitted if the sender is an anonymous principal. If the sender is authenticated, the sender_pubkey and sender_sig must be set.
+
+The call is calculated using the content record, which allows the signature to be based on the request ID.
+
+Transaction delegation
+A transaction's signature can be delegated from one key to another. If delegation is used, the sender_delegation field contains an array of delegations with the following fields:
+
+delegation (map): A map containing the fields:
+
+   - pubkey (blob): A public key.
+
+   - expiration (nat): The delegation's expiration, defined in nanoseconds analogously to the ingress_expiry.
+
+   - targets (array of CanisterId, optional): Sets the delegation to apply only for requests sent to the canisters within the canister list; has a maximum of 1_000 canisters.
+
+   - senders (array of Principal, optional): Sets the delegation to only apply for requests originating from the principals in the list.
+
+   - signature (blob): The signature for the 32-byte delegation field map, using the 27 bytes \x1Aic-request-auth-delegation as the domain separator.
+
+The first delegation in the array has a signature created using the public key corresponding to the sender_pubkey field. All subsequent delegations are signed with the public key corresponding to the key contained in the preceding delegation.
+
+The sender_sig field is calculated by concatenating the domain separator, \x0Aic-request, which is 11 bytes, with the 32-byte request ID, using the private key that belongs to the public key specified in the last delegation. If no delegations are present, the public key specified in sender_pubkey is used. If the delegation field is present, it should contain no more than 20 delegations.
+
+Verifying signatures with agent
+To verify a signature with an agent, an accepted identity is required. The following are accepted identity and signature types:
+
+Ed25519 and ECDSA signatures: Plain signatures are supported for these schemes.
+
+Ed25519 or ECDSA on curve P-256 (also known as secp256r1): Support for using SHA-256 as a hash function or using the Koblitz curve in secp256k1.
+
+When these identities are encoded as a Principal, an agent will attach a suffix byte, which indicates whether the identity is anonymous or self-authenticating.
+
+Self-authenticating identities using an Ed25519 or ECDSA curve will have a suffix of 2, while an anonymous identity has a single byte of 4.
+
+Verifying signatures with the Rust ic-validator-ingress-message crate
+The Rust ic-validator-ingress-message crate has been developed specifically for validating message signatures. Within this crate, the IngressMessageVerifier class containing the InternetIdentityAuthResponse can be validated as a whole using the delegation chain.
+
+The following example displays an example of how ingress messages can be verified. This example uses a hardcoded root of trust that is set to be the NNS root public key and uses system time to derive the current time.
+
+use ic_types::messages::{HttpCallContent, HttpRequest, SignedIngressContent};
+use ic_types::Time;
+use ic_validator_ingress_message::{RequestValidationError, HttpRequestVerifier, IngressMessageVerifier, TimeProvider};
+fn anonymous_http_request_with_ingress_expiry(
+    ingress_expiry: u64,
+) -> HttpRequest<SignedIngressContent> {
+    use ic_types::messages::Blob;
+    use ic_types::messages::HttpCanisterUpdate;
+    use ic_types::messages::HttpRequestEnvelope;
+    HttpRequest::try_from(HttpRequestEnvelope::<HttpCallContent> {
+        content: HttpCallContent::Call {
+            update: HttpCanisterUpdate {
+                canister_id: Blob(vec![42; 8]),
+                method_name: "some_method".to_string(),
+                arg: Blob(b"".to_vec()),
+                sender: Blob(vec![0x04]),
+                nonce: None,
+                ingress_expiry,
+            },
+        },
+        sender_pubkey: None,
+        sender_sig: None,
+        sender_delegation: None,
+    })
+        .expect("invalid http envelope")
+}
+let current_time = Time::from_nanos_since_unix_epoch(1_000);
+let request = anonymous_http_request_with_ingress_expiry(current_time.as_nanos_since_unix_epoch());
+let verifier = IngressMessageVerifier::default();
+
+let result = verifier.validate_request(&request);
+
+match result {
+    Err(RequestValidationError::InvalidIngressExpiry(_)) => {}
+     _ => panic!("unexpected result type {:?}", result)
+}
+
+
+Reference the crate's implementation logic for additional context.
+
+Verifying signatures with the JavaScript/TypeScript wrapper @dfinity/standalone-sig-verifier-web
+An npm library has been created as a JavaScript/TypeScript wrapper for the ic-standalone-sig-verifier Rust crate.
+
+The following is an example of how this library can be used:
+
+import initSigVerifier, {verifyIcSignature} from '@dfinity/standalone-sig-verifier-web';
+
+async function example(dataRaw, signatureRaw, derPublicKey, root_key) {
+    // load wasm module
+    await initSigVerifier();
+    try {
+        // call the signature verification wasm function
+        verifyIcSignature(dataRaw, signatureRaw, derPublicKey, root_key);
+        console.log('signature verified successfully')
+    } catch (error) {
+        // the library throws an error if the signature is invalid
+        console.error('signature verification failed', error)
+    }
+}
+
+When using this library, you should keep the following in mind:
+
+Verifying signatures on the frontend is unsafe, as malicious actors could modify the frontend code in order to bypass signature verification. Therefore, it is recommended that this library be used for demos, backends, or other situations where the code either cannot be modified or where modifications do not create a security risk.
+
+This library is built from the IC master branch, meaning the API used may change.
+
+This library's resulting Wasm module is large (400 KiB when gzipped); this should be taken into consideration for your project.
+
+You can download the library.
+
+Resources
+Rust ic-validator-ingress-message crate.
+IC specification.
+Using agents.

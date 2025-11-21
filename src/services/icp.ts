@@ -31,11 +31,11 @@ export async function getAnonymousAgent(): Promise<HttpAgent> {
   return anonymousAgent
 }
 
-export async function createAuthClient(): Promise<AuthClient> {
+export async function createAuthClient(): Promise<AuthClient | null> {
   // Only create auth client if Internet Identity is configured
-  // This prevents errors when Internet Identity is not set up
+  // Return null if not configured (Bitcoin wallet is an alternative)
   if (!ICP_CONFIG.internetIdentityUrl) {
-    throw new Error("Internet Identity URL not configured. Skipping Internet Identity authentication.")
+    return null
   }
   
   // Validate Internet Identity URL format before creating client
@@ -53,7 +53,8 @@ export async function createAuthClient(): Promise<AuthClient> {
                        !canisterId.match(/^[a-z0-9-]{27,}$/i)
       
       if (isInvalid) {
-        throw new Error("Invalid Internet Identity canister ID detected. Please deploy Internet Identity locally with 'dfx deploy internet_identity' or use Bitcoin wallet authentication instead.")
+        // Return null instead of throwing - Internet Identity is optional
+        return null
       }
     }
   }
@@ -63,13 +64,16 @@ export async function createAuthClient(): Promise<AuthClient> {
       authClient = await AuthClient.create()
     } catch (error: any) {
       // If AuthClient creation fails (e.g., invalid canister ID), don't block Bitcoin auth
-      // Check if it's the specific "canister id incorrect" error
-      if (error?.message?.includes("canister id incorrect") || error?.message?.includes("400")) {
-        logWarn("Internet Identity canister ID is incorrect. This is expected if you're using Bitcoin wallet authentication.")
-        throw new Error("Internet Identity not available. Use Bitcoin wallet authentication instead.")
+      // Return null instead of throwing - this allows Bitcoin wallet to work
+      if (error?.message?.includes("canister id incorrect") || 
+          error?.message?.includes("400") ||
+          error?.message?.includes("Invalid")) {
+        // Silently return null - Internet Identity is not available, but that's ok
+        return null
       }
+      // For other errors, log a warning but still return null
       logWarn("Failed to create AuthClient (this is ok if using Bitcoin wallet)", { error: String(error) })
-      throw error
+      return null
     }
   }
   return authClient
@@ -77,11 +81,18 @@ export async function createAuthClient(): Promise<AuthClient> {
 
 export async function login(): Promise<Principal | null> {
   if (!ICP_CONFIG.internetIdentityUrl) {
-    logError("Internet Identity URL not configured", new Error("Please deploy Internet Identity locally or set VITE_INTERNET_IDENTITY_URL in your .env file. See INTERNET_IDENTITY_SETUP.md for instructions."))
+    // Internet Identity is optional - Bitcoin wallet is an alternative
+    logWarn("Internet Identity URL not configured. Use Bitcoin wallet authentication instead.")
     return null
   }
 
   const authClient = await createAuthClient()
+  if (!authClient) {
+    // Internet Identity is not available (invalid canister ID, not deployed, etc.)
+    // This is expected when using Bitcoin wallet authentication
+    logWarn("Internet Identity not available. Use Bitcoin wallet authentication instead.")
+    return null
+  }
 
   return new Promise((resolve) => {
     authClient.login({
@@ -142,14 +153,17 @@ async function waitForWallet(
 function checkWalletInstalled(provider: string): boolean {
   if (typeof window === "undefined") return false
   
-  switch (provider.toLowerCase()) {
+  const normalized = provider.toLowerCase()
+  
+  switch (normalized) {
     case "wizz":
       return !!(window as any).wizz
     case "unisat":
       return !!(window as any).unisat
     case "bitcoinprovider":
     case "xverse":
-      return !!(window as any).XverseProviders?.BitcoinProvider
+      // Check for Xverse in multiple possible locations
+      return !!(window as any).XverseProviders?.BitcoinProvider || !!(window as any).Xverse
     default:
       return false
   }
@@ -276,79 +290,319 @@ export async function loginWithBitcoinWallet(provider: string): Promise<Principa
             throw new Error("Unisat wallet not found. Please make sure the extension is installed and unlocked.")
           }
           
+          logInfo("Connecting to Unisat wallet", { 
+            hasUnisat: !!unisat,
+            hasRequestAccounts: typeof unisat.requestAccounts === "function"
+          })
+          
           try {
-            const accounts = await unisat.requestAccounts()
+            // Add a small delay to ensure extension is ready
+            await new Promise(resolve => setTimeout(resolve, 100))
+            
+            // Try with timeout (30 seconds for user interaction)
+            const accounts = await Promise.race([
+              unisat.requestAccounts(),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error("Request timeout after 30s")), 30000)
+              )
+            ]) as string[]
+            
+            // Check for Chrome runtime errors
+            const chromeRuntime = (window as any).chrome?.runtime
+            if (chromeRuntime?.lastError) {
+              const errorMsg = chromeRuntime.lastError.message || String(chromeRuntime.lastError)
+              logWarn("Chrome runtime error after Unisat requestAccounts", { error: errorMsg })
+              throw new Error(`Chrome runtime error: ${errorMsg}`)
+            }
+            
             if (accounts && accounts.length > 0) {
+              logInfo("Unisat wallet returned accounts", { accountCount: accounts.length, firstAccount: accounts[0] })
               return accounts[0]
             }
             throw new Error("No accounts found in Unisat wallet. Please make sure you have an account set up.")
           } catch (error: any) {
-            if (error.code === 4001 || error.message?.includes("reject") || error.message?.includes("denied")) {
-              throw new Error("Connection was rejected. Please try again and approve the connection.")
+            const errorMsg = error?.message || String(error)
+            logError("Unisat wallet connection error", error as Error, { 
+              errorCode: error?.code,
+              errorMessage: errorMsg,
+              errorName: error?.name
+            })
+            
+            if (error.code === 4001 || errorMsg.includes("reject") || errorMsg.includes("denied")) {
+              throw new Error("Connection was rejected. Please try again and approve the connection in Unisat wallet.")
             }
-            if (error.message?.includes("locked") || error.message?.includes("unlock")) {
+            if (errorMsg.includes("locked") || errorMsg.includes("unlock")) {
               throw new Error("Wallet is locked. Please unlock your Unisat wallet and try again.")
             }
-            throw new Error(`Failed to connect to Unisat wallet: ${error.message || "Unknown error"}`)
+            if (errorMsg.includes("timeout")) {
+              throw new Error("Unisat wallet connection timed out. The wallet may be waiting for your approval. Please: 1) Check if a popup appeared in Unisat, 2) Ensure Unisat is unlocked, 3) Try clicking the connect button again.")
+            }
+            if (errorMsg.includes("message channel") || errorMsg.includes("asynchronous response")) {
+              throw new Error("Unisat wallet extension is not responding. Please try: 1) Refreshing the page, 2) Ensuring Unisat is unlocked, 3) Restarting the Unisat extension.")
+            }
+            throw new Error(`Failed to connect to Unisat wallet: ${errorMsg || "Unknown error"}`)
           }
         },
         xverse: async () => {
+          // Check for Xverse wallet in multiple possible locations
           const XverseProviders = (window as any).XverseProviders
-          if (!XverseProviders?.BitcoinProvider) {
-            throw new Error("Xverse wallet not found. Please make sure the extension is installed and unlocked.")
+          const Xverse = (window as any).Xverse
+          
+          logInfo("Checking for Xverse wallet", { 
+            hasXverseProviders: !!XverseProviders,
+            hasBitcoinProvider: !!XverseProviders?.BitcoinProvider,
+            hasXverse: !!Xverse,
+            xverseType: typeof XverseProviders?.BitcoinProvider
+          })
+          
+          if (!XverseProviders?.BitcoinProvider && !Xverse) {
+            throw new Error("Xverse wallet not found. Please make sure the Xverse extension is installed and unlocked.")
           }
           
           try {
-            // BitcoinProvider might be an instance or a constructor
-            // Try using it as an instance first, then as a constructor
             let xverseProvider: any
-            
-            // Check if BitcoinProvider is already an instance (has requestAccounts method)
-            if (typeof XverseProviders.BitcoinProvider.requestAccounts === "function") {
-              xverseProvider = XverseProviders.BitcoinProvider
-            } 
-            // Check if BitcoinProvider is a constructor (has prototype or can be instantiated)
-            else if (typeof XverseProviders.BitcoinProvider === "function") {
-              xverseProvider = new XverseProviders.BitcoinProvider()
-            }
-            // If it's neither, try accessing it directly
-            else {
-              xverseProvider = XverseProviders.BitcoinProvider
-            }
-            
-            // Try to get accounts
             let response: any
-            if (typeof xverseProvider.requestAccounts === "function") {
-              response = await xverseProvider.requestAccounts()
-            } else if (typeof xverseProvider.request === "function") {
-              response = await xverseProvider.request({ method: "requestAccounts" })
-            } else {
-              throw new Error("Xverse wallet API not recognized. Please check the wallet extension version.")
+            
+            // Method 1: Try XverseProviders.BitcoinProvider (newer API)
+            if (XverseProviders?.BitcoinProvider) {
+              const BitcoinProvider = XverseProviders.BitcoinProvider
+              
+              // Check if it's already an instance
+              if (typeof BitcoinProvider.requestAccounts === "function") {
+                xverseProvider = BitcoinProvider
+                logInfo("Using XverseProviders.BitcoinProvider as instance")
+              } 
+              // Check if it's a constructor
+              else if (typeof BitcoinProvider === "function") {
+                try {
+                  xverseProvider = new BitcoinProvider()
+                  logInfo("Instantiated XverseProviders.BitcoinProvider")
+                } catch (constructorError: any) {
+                  logWarn("Failed to instantiate BitcoinProvider, trying as direct object", { error: String(constructorError) })
+                  xverseProvider = BitcoinProvider
+                }
+              }
+              // Try as direct object
+              else {
+                xverseProvider = BitcoinProvider
+                logInfo("Using XverseProviders.BitcoinProvider as direct object")
+              }
             }
+            // Method 2: Try Xverse directly (older API)
+            else if (Xverse) {
+              xverseProvider = Xverse
+              logInfo("Using Xverse directly")
+            }
+            
+            if (!xverseProvider) {
+              throw new Error("Xverse wallet provider not found. Please check the wallet extension.")
+            }
+            
+            // Log available methods for debugging
+            const availableMethodsList = Object.keys(xverseProvider).filter(key => 
+              typeof xverseProvider[key] === "function"
+            )
+            logInfo("Available methods on Xverse provider", { methods: availableMethodsList })
+            
+            // Try to get accounts using different methods with retry logic
+            // The extension might need a moment to be ready
+            // Order matters: try direct methods first, then request API
+            const methods = [
+              {
+                name: "requestAccounts (direct)",
+                fn: () => xverseProvider.requestAccounts(),
+                condition: typeof xverseProvider.requestAccounts === "function",
+                timeout: 30000 // 30 seconds for user interaction
+              },
+              {
+                name: "getAccounts",
+                fn: () => xverseProvider.getAccounts(),
+                condition: typeof xverseProvider.getAccounts === "function",
+                timeout: 10000
+              },
+              {
+                name: "enable",
+                fn: () => xverseProvider.enable(),
+                condition: typeof xverseProvider.enable === "function",
+                timeout: 30000 // 30 seconds for user interaction
+              },
+              {
+                name: "request with requestAccounts method",
+                fn: () => xverseProvider.request({ method: "requestAccounts" }),
+                condition: typeof xverseProvider.request === "function",
+                timeout: 30000 // 30 seconds for user interaction
+              },
+              {
+                name: "request with getAccounts method",
+                fn: () => xverseProvider.request({ method: "getAccounts" }),
+                condition: typeof xverseProvider.request === "function",
+                timeout: 10000
+              }
+            ]
+            
+            const availableMethods = methods.filter(m => m.condition)
+            
+            if (availableMethods.length === 0) {
+              logError("Xverse wallet API not recognized", new Error(`Provider type: ${typeof xverseProvider}, available methods: ${Object.keys(xverseProvider || {}).join(", ")}`))
+              throw new Error("Xverse wallet API not recognized. Please check the wallet extension version or try updating Xverse.")
+            }
+            
+            // Try each method with retry logic
+            let lastError: any = null
+            for (const method of availableMethods) {
+              try {
+                logInfo(`Trying ${method.name} on Xverse provider`, { timeout: method.timeout })
+                
+                // Add a small delay before calling to ensure extension is ready
+                await new Promise(resolve => setTimeout(resolve, 200))
+                
+                // Try with timeout to avoid hanging
+                // Use method-specific timeout (longer for methods that require user interaction)
+                const timeout = method.timeout || 10000
+                response = await Promise.race([
+                  method.fn(),
+                  new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error(`Request timeout after ${timeout}ms`)), timeout)
+                  )
+                ])
+                
+                // Check for Chrome runtime errors immediately after call
+                const chromeRuntime = (window as any).chrome?.runtime
+                if (chromeRuntime?.lastError) {
+                  const errorMsg = chromeRuntime.lastError.message || String(chromeRuntime.lastError)
+                  logWarn(`Chrome runtime error after ${method.name}`, { error: errorMsg })
+                  
+                  // If it's a message channel error, try next method
+                  if (errorMsg.includes("message channel") || errorMsg.includes("asynchronous response")) {
+                    throw new Error(`Message channel error: ${errorMsg}`)
+                  }
+                  
+                  // For other Chrome errors, throw to try next method
+                  throw new Error(`Chrome runtime error: ${errorMsg}`)
+                }
+                
+                logInfo(`Successfully called ${method.name}`, { response })
+                break // Success, exit loop
+              } catch (methodError: any) {
+                lastError = methodError
+                const errorMsg = methodError?.message || String(methodError)
+                
+                // If it's a message channel error, try next method
+                if (errorMsg.includes("message channel") || 
+                    errorMsg.includes("asynchronous response") ||
+                    errorMsg.includes("runtime.lastError")) {
+                  logWarn(`${method.name} failed with message channel error, trying next method`, { error: errorMsg })
+                  continue // Try next method
+                }
+                
+                // If it's a timeout and we have more methods, try next
+                if (errorMsg.includes("timeout") && availableMethods.length > 1) {
+                  logWarn(`${method.name} timed out, trying next method`, { error: errorMsg })
+                  continue // Try next method
+                }
+                
+                // If it's a user rejection, don't try other methods
+                if (methodError.code === 4001 || errorMsg.includes("reject") || errorMsg.includes("denied")) {
+                  throw new Error("Connection was rejected. Please try again and approve the connection in Xverse wallet.")
+                }
+                
+                // For other errors, log and try next method
+                logWarn(`${method.name} failed, trying next method`, { error: errorMsg })
+              }
+            }
+            
+            // If all methods failed, throw a helpful error
+            if (!response && lastError) {
+              const errorMsg = lastError?.message || String(lastError)
+              if (errorMsg.includes("message channel") || 
+                  errorMsg.includes("asynchronous response") ||
+                  errorMsg.includes("runtime.lastError")) {
+                throw new Error("Xverse wallet extension is not responding. Please try: 1) Refreshing the page, 2) Ensuring Xverse is unlocked, 3) Restarting the Xverse extension.")
+              }
+              if (errorMsg.includes("timeout")) {
+                throw new Error("Xverse wallet connection timed out. The wallet may be waiting for your approval. Please: 1) Check if a popup appeared in Xverse, 2) Ensure Xverse is unlocked, 3) Try clicking the connect button again.")
+              }
+              throw lastError
+            }
+            
+            if (!response) {
+              throw new Error("Failed to connect to Xverse wallet. No response from any connection method.")
+            }
+            
+            logInfo("Xverse wallet response", { response, responseType: typeof response, isArray: Array.isArray(response) })
             
             // Handle different response formats
             if (Array.isArray(response)) {
-              return response[0] || response
+              const address = response[0] || response
+              logInfo("Extracted address from array", { address })
+              return address
             }
             if (response?.accounts && Array.isArray(response.accounts)) {
-              return response.accounts[0]
+              const address = response.accounts[0]
+              logInfo("Extracted address from accounts array", { address })
+              return address
+            }
+            if (response?.result && Array.isArray(response.result)) {
+              const address = response.result[0]
+              logInfo("Extracted address from result array", { address })
+              return address
             }
             if (typeof response === "string") {
+              logInfo("Response is string address", { address: response })
               return response
             }
+            if (response?.address) {
+              logInfo("Extracted address from address field", { address: response.address })
+              return response.address
+            }
             
+            logWarn("Unexpected Xverse response format", { response })
             return response
           } catch (error: any) {
-            if (error.code === 4001 || error.message?.includes("reject") || error.message?.includes("denied")) {
-              throw new Error("Connection was rejected. Please try again and approve the connection.")
+            const errorMessage = error?.message || String(error)
+            const chromeError = (window as any).chrome?.runtime?.lastError?.message
+            
+            logError("Xverse wallet connection error", error as Error, { 
+              errorCode: error?.code,
+              errorMessage,
+              errorName: error?.name,
+              chromeRuntimeError: chromeError
+            })
+            
+            // Check for timeout errors FIRST (before checking for locked)
+            // Timeout errors should not be confused with locked errors
+            if (errorMessage.includes("timeout") || errorMessage.includes("Request timeout")) {
+              throw new Error("Xverse wallet connection timed out. The wallet may be waiting for your approval. Please: 1) Check if a popup appeared in Xverse, 2) Ensure Xverse is unlocked, 3) Try clicking the connect button again, 4) Make sure Xverse extension is not blocked by browser.")
             }
-            if (error.message?.includes("locked") || error.message?.includes("unlock")) {
+            
+            // Check for Chrome extension message channel errors
+            if (errorMessage.includes("message channel") || 
+                errorMessage.includes("asynchronous response") ||
+                errorMessage.includes("runtime.lastError") ||
+                chromeError?.includes("message channel") ||
+                chromeError?.includes("asynchronous response")) {
+              throw new Error("Xverse wallet extension is not responding. Please try: 1) Refreshing the page, 2) Ensuring Xverse is unlocked, 3) Restarting the Xverse extension, or 4) Waiting a few seconds and trying again.")
+            }
+            
+            // Check for user rejection
+            if (error.code === 4001 || errorMessage.includes("reject") || errorMessage.includes("denied")) {
+              throw new Error("Connection was rejected. Please try again and approve the connection in Xverse wallet.")
+            }
+            
+            // Check for locked wallet (but only if it's NOT a timeout error)
+            // Some wallets return "locked" when they timeout, so we need to be careful
+            if ((errorMessage.includes("locked") || errorMessage.includes("unlock")) && 
+                !errorMessage.includes("timeout")) {
               throw new Error("Wallet is locked. Please unlock your Xverse wallet and try again.")
             }
-            if (error.message?.includes("not a constructor")) {
+            
+            if (errorMessage.includes("not a constructor") || errorMessage.includes("not a function")) {
               throw new Error("Xverse wallet API error. Please update the Xverse extension or try refreshing the page.")
             }
-            throw new Error(`Failed to connect to Xverse wallet: ${error.message || "Unknown error"}`)
+            if (errorMessage.includes("not found") || errorMessage.includes("not installed")) {
+              throw new Error("Xverse wallet not found. Please install the Xverse browser extension.")
+            }
+            throw new Error(`Failed to connect to Xverse wallet: ${errorMessage || "Unknown error"}`)
           }
         }
       }
@@ -499,7 +753,10 @@ export async function logout(): Promise<void> {
   
   if (siwbIdentity) {
     try {
-      await siwbIdentity.logout()
+      // Only call logout if it exists - not all identity types have this method
+      if (typeof siwbIdentity.logout === "function") {
+        await siwbIdentity.logout()
+      }
     } catch (error) {
       logError("Error logging out from Bitcoin wallet", error as Error)
     }
@@ -557,6 +814,13 @@ export async function getIdentity(): Promise<Principal | null> {
   if (ICP_CONFIG.internetIdentityUrl) {
     try {
       const authClient = await createAuthClient()
+      
+      // If authClient is null, Internet Identity is not available (e.g., invalid canister ID)
+      // This is expected and shouldn't be logged as a warning
+      if (!authClient) {
+        return null
+      }
+      
       const iiIdentity = authClient.getIdentity()
 
       if (iiIdentity) {
@@ -581,9 +845,12 @@ export async function getIdentity(): Promise<Principal | null> {
       }
     } catch (error) {
       // Internet Identity might not be configured - that's ok if using Bitcoin wallet
-      // Don't log warnings if it's just not configured (silent fail)
-      if (error instanceof Error && !error.message.includes("canister id incorrect")) {
-        logWarn("Could not check Internet Identity (this is ok if using Bitcoin wallet)", { error: error.message })
+      // Only log unexpected errors (not configuration issues)
+      if (error instanceof Error && 
+          !error.message.includes("canister id incorrect") &&
+          !error.message.includes("Internet Identity") &&
+          !error.message.includes("400")) {
+        logWarn("Unexpected error checking Internet Identity (this is ok if using Bitcoin wallet)", { error: error.message })
       }
     }
   }

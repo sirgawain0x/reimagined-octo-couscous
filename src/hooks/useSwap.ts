@@ -82,8 +82,23 @@ export function useSwap() {
       
       setPools(formattedPools.length > 0 ? formattedPools : mockPools)
     } catch (error) {
-      logError("Error loading pools", error as Error)
-      setPools(mockPools)
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorString = String(error)
+      
+      // Check for canister with no Wasm module (not deployed)
+      if (errorMessage.includes("contains no Wasm module") ||
+          errorMessage.includes("Wasm module not found") ||
+          errorMessage.includes("IC0537") ||
+          errorString.includes("contains no Wasm module") ||
+          errorString.includes("IC0537")) {
+        logError("Swap canister not deployed", error as Error)
+        // Use fallback mock pools
+        setPools(mockPools)
+      } else {
+        logError("Error loading pools", error as Error)
+        // Use fallback mock pools
+        setPools(mockPools)
+      }
     } finally {
       setIsLoading(false)
     }

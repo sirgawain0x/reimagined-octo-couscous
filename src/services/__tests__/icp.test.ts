@@ -57,7 +57,7 @@ describe('ICP service', () => {
       expect(client).toBe(mockAuthClient)
     })
 
-    it('should throw error if Internet Identity URL not configured', async () => {
+    it('should return null if Internet Identity URL not configured', async () => {
       // Mock environment to not have Internet Identity URL
       const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
       delete process.env.VITE_INTERNET_IDENTITY_URL
@@ -66,7 +66,23 @@ describe('ICP service', () => {
       await vi.resetModules()
       const { createAuthClient: createAuthClientReloaded } = await import('../icp')
 
-      await expect(createAuthClientReloaded()).rejects.toThrow('Internet Identity URL not configured')
+      const client = await createAuthClientReloaded()
+      expect(client).toBeNull()
+
+      process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
+    })
+
+    it('should return null if Internet Identity canister ID is invalid', async () => {
+      // Mock environment with invalid canister ID
+      const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
+      process.env.VITE_INTERNET_IDENTITY_URL = 'http://localhost:4943?canisterId=rdmx6-jaaaa-aaaah-qcaiq-cai'
+
+      // Reload the module to get fresh config
+      await vi.resetModules()
+      const { createAuthClient: createAuthClientReloaded } = await import('../icp')
+
+      const client = await createAuthClientReloaded()
+      expect(client).toBeNull()
 
       process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
     })

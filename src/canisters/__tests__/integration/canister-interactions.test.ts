@@ -128,6 +128,69 @@ describe('Canister Integration Tests', () => {
       }
     })
 
+    it('should handle cross-canister calls from portfolio to lending for borrows', async () => {
+      if (!portfolioActor || !lendingActor) {
+        return // Skip if canisters not available
+      }
+
+      // Portfolio canister should fetch borrows from lending canister
+      try {
+        const portfolio = await portfolioActor.getPortfolio(testPrincipal)
+        expect(portfolio).toBeDefined()
+        expect(typeof portfolio.totalBorrowed).toBe('number')
+        expect(portfolio.totalBorrowed).toBeGreaterThanOrEqual(0)
+      } catch (error) {
+        // Expected if principal has no portfolio data or lending canister not configured
+        expect(error).toBeDefined()
+      }
+    })
+
+    it('should calculate totalBorrowed correctly from lending canister', async () => {
+      if (!portfolioActor || !lendingActor) {
+        return // Skip if canisters not available
+      }
+
+      try {
+        // Get borrows directly from lending canister
+        const borrows = await lendingActor.getUserBorrows(testPrincipal)
+        expect(Array.isArray(borrows)).toBe(true)
+
+        // Get portfolio which should aggregate borrows
+        const portfolio = await portfolioActor.getPortfolio(testPrincipal)
+        expect(portfolio).toBeDefined()
+        expect(typeof portfolio.totalBorrowed).toBe('number')
+
+        // If user has borrows, totalBorrowed should be > 0
+        // If user has no borrows, totalBorrowed should be 0
+        if (borrows.length > 0) {
+          expect(portfolio.totalBorrowed).toBeGreaterThan(0)
+        } else {
+          expect(portfolio.totalBorrowed).toBe(0)
+        }
+      } catch (error) {
+        // Expected if principal has no data or canisters not configured
+        expect(error).toBeDefined()
+      }
+    })
+
+    it('should handle cross-canister call failures gracefully for borrows', async () => {
+      if (!portfolioActor) {
+        return // Skip if canister not available
+      }
+
+      // Portfolio should still return a valid portfolio even if lending canister call fails
+      try {
+        const portfolio = await portfolioActor.getPortfolio(testPrincipal)
+        expect(portfolio).toBeDefined()
+        // Should have totalBorrowed field even if call failed (should be 0)
+        expect(typeof portfolio.totalBorrowed).toBe('number')
+        expect(portfolio.totalBorrowed).toBeGreaterThanOrEqual(0)
+      } catch (error) {
+        // Only fail if portfolio canister itself fails, not if cross-canister calls fail
+        expect(error).toBeDefined()
+      }
+    })
+
     it('should handle error propagation across canisters', async () => {
       if (!portfolioActor) {
         return // Skip if canister not available

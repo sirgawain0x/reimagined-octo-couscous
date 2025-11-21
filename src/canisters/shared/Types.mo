@@ -85,6 +85,7 @@ module Types {
     totalValue : Float;
     totalRewards : Nat64;
     totalLended : Float;
+    totalBorrowed : Float;
     assets : [PortfolioAsset];
   };
 

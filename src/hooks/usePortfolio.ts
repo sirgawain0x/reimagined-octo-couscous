@@ -61,6 +61,7 @@ export function usePortfolio() {
         totalValue: canisterPortfolio.totalValue,
         totalRewards: Number(canisterPortfolio.totalRewards) / 1e8, // Convert from nat64
         totalLended: canisterPortfolio.totalLended,
+        totalBorrowed: canisterPortfolio.totalBorrowed,
         assets: canisterPortfolio.assets.map((asset) => ({
           name: asset.name,
           symbol: asset.symbol,
@@ -73,9 +74,19 @@ export function usePortfolio() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       const errorName = error instanceof Error ? error.name : ""
+      const errorString = String(error)
       
+      // Check for canister with no Wasm module (not deployed)
+      if (errorMessage.includes("contains no Wasm module") ||
+          errorMessage.includes("Wasm module not found") ||
+          errorMessage.includes("IC0537") ||
+          errorString.includes("contains no Wasm module") ||
+          errorString.includes("IC0537")) {
+        logError("Portfolio canister not deployed", error as Error)
+        setError("Portfolio canister is not deployed. Please deploy the portfolio canister using 'dfx deploy portfolio' or update VITE_CANISTER_ID_PORTFOLIO with a deployed canister ID.")
+      }
       // Check if error is due to network mismatch or missing canister (TrustError)
-      if (errorName === "TrustError" || errorMessage.includes("node signatures") || errorMessage.includes("TrustError")) {
+      else if (errorName === "TrustError" || errorMessage.includes("node signatures") || errorMessage.includes("TrustError")) {
         logError("Network mismatch or canister not found", error as Error)
         setError("Portfolio canister not found or network mismatch. Make sure VITE_ICP_NETWORK matches where your canisters are deployed (local vs ic).")
       } else if (errorMessage.includes("placeholder") || errorMessage.includes("Invalid canister ID")) {
@@ -94,6 +105,7 @@ export function usePortfolio() {
         totalValue: 0,
         totalRewards: 0,
         totalLended: 0,
+        totalBorrowed: 0,
         assets: [],
       })
     } finally {

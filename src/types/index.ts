@@ -25,6 +25,7 @@ export interface Portfolio {
   totalValue: number
   totalRewards: number
   totalLended: number
+  totalBorrowed: number
   assets: PortfolioAsset[]
 }
 

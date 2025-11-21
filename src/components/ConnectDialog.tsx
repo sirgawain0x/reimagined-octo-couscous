@@ -41,6 +41,9 @@ function ConnectDialog({ isOpen, onClose, onConnect }: ConnectDialogProps) {
         // Update the global identity in icp service
         await setBitcoinIdentity(principal)
         
+        // Small delay to ensure identity is fully set before notifying parent
+        await new Promise(resolve => setTimeout(resolve, 50))
+        
         // Notify parent component
         onConnect(principal)
         onClose()

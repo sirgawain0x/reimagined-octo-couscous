@@ -1,8 +1,10 @@
-import { useState } from "react"
-import { ArrowDownUp, ArrowRight, Info } from "lucide-react"
+import { useState, useEffect } from "react"
+import { ArrowDownUp, ArrowRight, Info, Lock } from "lucide-react"
 import { useSwap } from "@/hooks/useSwap"
+import { useICP } from "@/hooks/useICP"
 import { SolanaInfo } from "@/components/SolanaInfo"
 import { logError } from "@/utils/logger"
+import { formatTokenAmount } from "@/lib/utils"
 
 const TOKENS = [
   { symbol: "ckBTC", name: "Chain-Key Bitcoin", decimals: 8, icon: "₿" },
@@ -13,11 +15,47 @@ const TOKENS = [
 
 export default function SwapView() {
   const { pools, quote, isLoading, getQuote, executeSwap } = useSwap()
+  const { isConnected } = useICP()
   const [fromToken, setFromToken] = useState("ckBTC")
   const [toToken, setToToken] = useState("ICP")
   const [fromAmount, setFromAmount] = useState("")
   const [isSwapping, setIsSwapping] = useState(false)
   const [selectedPool, setSelectedPool] = useState("ckBTC_ICP")
+
+  // Auto-select pool when tokens change
+  useEffect(() => {
+    if (pools.length === 0) return
+
+    // Try to find pool matching fromToken_toToken or toToken_fromToken
+    const poolId1 = `${fromToken}_${toToken}`
+    const poolId2 = `${toToken}_${fromToken}`
+    
+    const matchingPool = pools.find(
+      (pool) => pool.id === poolId1 || pool.id === poolId2
+    )
+
+    if (matchingPool) {
+      setSelectedPool(matchingPool.id)
+    } else {
+      // Fallback to first pool if no match found
+      setSelectedPool(pools[0].id)
+    }
+  }, [fromToken, toToken, pools])
+
+  // Auto-fetch quote when tokens or pool change if amount is already entered
+  // Note: fromAmount is checked inside but not in deps to avoid double-fetching on amount changes
+  useEffect(() => {
+    if (fromAmount && parseFloat(fromAmount) > 0 && selectedPool && !isLoading) {
+      const fromTokenInfo = TOKENS.find((t) => t.symbol === fromToken)
+      const decimals = fromTokenInfo?.decimals || 8
+      const multiplier = BigInt(10 ** decimals)
+      const amountBigInt = BigInt(Math.floor(parseFloat(fromAmount) * Number(multiplier)))
+      getQuote(selectedPool, amountBigInt).catch((error) => {
+        logError("Error fetching quote on token change", error as Error)
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPool, fromToken, toToken, isLoading])
 
   function handleSwapTokens() {
     const temp = fromToken
@@ -84,6 +122,27 @@ export default function SwapView() {
     )
   }
 
+  if (!isConnected) {
+    return (
+      <div className="animate-fade-in flex items-center justify-center min-h-[400px]">
+        <div className="bg-gray-800 rounded-xl shadow-lg p-8 max-w-md text-center">
+          <div className="flex justify-center mb-4">
+            <div className="bg-purple-500/20 p-4 rounded-full">
+              <Lock className="h-12 w-12 text-purple-400" />
+            </div>
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Connect Your Wallet</h2>
+          <p className="text-gray-400 mb-4">
+            Please connect your Internet Identity or Bitcoin wallet to swap tokens.
+          </p>
+          <p className="text-sm text-gray-500">
+            Use the connection buttons in the header to sign in.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="animate-fade-in max-w-2xl mx-auto">
       <h1 className="text-4xl font-extrabold text-white mb-4">Swap Tokens</h1>
@@ -113,7 +172,7 @@ export default function SwapView() {
                 <div className="flex-1 bg-gray-700 rounded-lg border border-gray-600 px-4 py-3 text-white focus-within:ring-2 focus-within:ring-blue-500">
                   <input
                     type="text"
-                    placeholder="0.00"
+                    placeholder="0.00000"
                     value={fromAmount}
                     onChange={(e) => handleAmountChange(e.target.value)}
                     className="bg-transparent w-full outline-none text-right text-lg"
@@ -154,7 +213,7 @@ export default function SwapView() {
                 </select>
                 <div className="flex-1 bg-gray-700 rounded-lg border border-gray-600 px-4 py-3 text-white">
                   <div className="text-right text-lg">
-                    {outputAmount.toFixed(toTokenInfo?.decimals || 8)}
+                    {formatTokenAmount(outputAmount, toTokenInfo?.decimals || 8, 5)}
                   </div>
                 </div>
               </div>
@@ -176,7 +235,7 @@ export default function SwapView() {
                 </div>
                 <div className="flex justify-between text-gray-300">
                   <span>Fee (0.3%)</span>
-                  <span>{(Number(quote.fee) / (10 ** (toTokenInfo?.decimals || 8))).toFixed(8)}</span>
+                  <span>{formatTokenAmount(Number(quote.fee) / (10 ** (toTokenInfo?.decimals || 8)), toTokenInfo?.decimals || 8)}</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-gray-400 pt-2 border-t border-gray-600">
                   <Info className="h-4 w-4" />

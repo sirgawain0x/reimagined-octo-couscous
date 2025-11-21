@@ -146,6 +146,7 @@ export function useLending() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       const errorName = error instanceof Error ? error.name : ""
+      const errorString = String(error)
       
       // Check for canister ID configuration errors (validation errors)
       if (errorMessage.includes("canister ID not configured") || 
@@ -158,6 +159,18 @@ export function useLending() {
         setAssets(mockLendingAssets)
         setDeposits([])
       } 
+      // Check for canister with no Wasm module (not deployed)
+      else if (errorMessage.includes("contains no Wasm module") ||
+               errorMessage.includes("Wasm module not found") ||
+               errorMessage.includes("IC0537") ||
+               errorString.includes("contains no Wasm module") ||
+               errorString.includes("IC0537")) {
+        logError("Lending canister not deployed", error as Error)
+        setError("Lending canister is not deployed. Please deploy the lending canister using 'dfx deploy lending' or update VITE_CANISTER_ID_LENDING with a deployed canister ID.")
+        // Use fallback data
+        setAssets(mockLendingAssets)
+        setDeposits([])
+      }
       // Check if error is due to network mismatch or missing canister (TrustError)
       else if (errorName === "TrustError" || errorMessage.includes("node signatures") || errorMessage.includes("TrustError")) {
         logError("Network mismatch or canister not found", error as Error)
@@ -169,7 +182,7 @@ export function useLending() {
       // Check for canister not found errors from the IC
       else if (errorMessage.includes("canister_not_found") || 
                errorMessage.includes("not found") ||
-               errorMessage.includes("Canister") && errorMessage.includes("not found")) {
+               (errorMessage.includes("Canister") && errorMessage.includes("not found"))) {
         logError("Lending canister not found", error as Error)
         setError("Lending canister not found. The canister ID may be incorrect or the canister may not be deployed. Run 'dfx canister id lending_canister' to get the correct ID and update VITE_CANISTER_ID_LENDING in your .env file.")
         // Use fallback data

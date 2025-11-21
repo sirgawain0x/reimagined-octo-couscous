@@ -73,6 +73,16 @@ export function useRewards() {
           logWarn("Rewards canister not deployed. Using fallback stores.", { error: errorMessage })
         }
         setError(null) // Clear error - fallback is intentional
+      } else if (errorMessage.includes("contains no Wasm module") ||
+                 errorMessage.includes("Wasm module not found") ||
+                 errorMessage.includes("IC0537") ||
+                 String(error).includes("contains no Wasm module") ||
+                 String(error).includes("IC0537")) {
+        // Canister not deployed (no Wasm module)
+        if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_CANISTERS === "true") {
+          logWarn("Rewards canister not deployed. Using fallback stores.", { error: errorMessage })
+        }
+        setError(null) // Clear error - fallback is intentional
       } else if (errorName === "TrustError" || errorMessage.includes("node signatures") || errorMessage.includes("TrustError")) {
         // Network mismatch
         if (import.meta.env.DEV && import.meta.env.VITE_DEBUG_CANISTERS === "true") {

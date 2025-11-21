@@ -25,10 +25,15 @@ function ViewLoader() {
 
 function App() {
   const [view, setView] = useState<View>("shop")
-  const { isConnected, connect, disconnect, principal } = useICP()
+  const { isConnected, connect, disconnect, principal, setConnected } = useICP()
 
   async function handleConnectWallet() {
     await connect()
+  }
+
+  function handleBitcoinConnect(principal: Principal) {
+    // Directly set the connection state when Bitcoin wallet connects
+    setConnected(principal)
   }
 
   return (
@@ -38,6 +43,7 @@ function App() {
         onNavigate={setView} 
         isConnected={isConnected} 
         onConnect={handleConnectWallet}
+        onBitcoinConnect={handleBitcoinConnect}
         onDisconnect={disconnect}
         principal={principal}
       />

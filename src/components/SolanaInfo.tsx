@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react"
-import { Copy, RefreshCw, ExternalLink, Wallet } from "lucide-react"
+import { Copy, RefreshCw, ExternalLink, Wallet, Info } from "lucide-react"
 import { useSolana } from "@/hooks/useSolana"
+import { useICP } from "@/hooks/useICP"
 import { logError } from "@/utils/logger"
 
 export function SolanaInfo() {
   const { address, balance, isLoading, error, getBalance, getRecentBlockhash, getSlot } = useSolana()
+  const { isConnected } = useICP()
   const [blockhash, setBlockhash] = useState<string | null>(null)
   const [slot, setSlot] = useState<bigint | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -68,6 +70,33 @@ export function SolanaInfo() {
     return `${hash.slice(0, 8)}...${hash.slice(-8)}`
   }
 
+  // Filter out technical Candid errors that users won't understand
+  function shouldShowError(errorMessage: string | null): boolean {
+    if (!errorMessage) return false
+    
+    const technicalErrors = [
+      "Invalid opt text argument",
+      "Invalid opt",
+      "Candid decode error",
+      "Type mismatch"
+    ]
+    
+    return !technicalErrors.some(techError => 
+      errorMessage.toLowerCase().includes(techError.toLowerCase())
+    )
+  }
+
+  // Get user-friendly error message or null if it's a technical error
+  function getUserFriendlyError(errorMessage: string | null): string | null {
+    if (!errorMessage) return null
+    
+    if (!shouldShowError(errorMessage)) {
+      return null // Hide technical errors
+    }
+    
+    return errorMessage
+  }
+
   return (
     <div className="bg-gray-800 rounded-xl shadow-lg p-6">
       <div className="flex items-center justify-between mb-4">
@@ -85,9 +114,25 @@ export function SolanaInfo() {
         </button>
       </div>
 
-      {error && (
+      {getUserFriendlyError(error) && (
         <div className="mb-4 p-3 bg-red-900/20 border border-red-800 rounded-lg text-red-300 text-sm">
-          {error}
+          {getUserFriendlyError(error)}
+        </div>
+      )}
+
+      {/* Show helpful message if connected but no Solana address */}
+      {isConnected && !address && !isLoading && (
+        <div className="mb-4 p-3 bg-blue-900/20 border border-blue-800 rounded-lg">
+          <div className="flex items-start gap-2">
+            <Info className="h-4 w-4 text-blue-400 mt-0.5 flex-shrink-0" />
+            <div className="text-blue-300 text-sm">
+              <p className="font-medium mb-1">Solana features require Internet Identity</p>
+              <p className="text-xs text-blue-400/80">
+                To interact with Solana, please connect via Internet Identity using the "Identity" button in the header.
+                Bitcoin wallet connection alone is not sufficient for Solana operations.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
