@@ -34,7 +34,6 @@ export function useSwap() {
   const [pools, setPools] = useState<SwapPool[]>([])
   const [quote, setQuote] = useState<SwapQuote | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [_error, setError] = useState<string | null>(null)
   const { principal, isConnected } = useICP()
 
   useEffect(() => {
@@ -43,7 +42,6 @@ export function useSwap() {
 
   async function loadPools() {
     setIsLoading(true)
-    setError(null)
     
     try {
       const canister = await retry(
@@ -85,7 +83,6 @@ export function useSwap() {
       setPools(formattedPools.length > 0 ? formattedPools : mockPools)
     } catch (error) {
       logError("Error loading pools", error as Error)
-      setError("Failed to load pools from canister")
       setPools(mockPools)
     } finally {
       setIsLoading(false)
