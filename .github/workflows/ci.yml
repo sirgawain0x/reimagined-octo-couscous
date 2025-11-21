@@ -130,6 +130,15 @@ jobs:
         with:
           version: '0.20.0'
 
+      - name: Install Motoko Package Manager (mops)
+        run: |
+          wget https://github.com/dfinity/mops/releases/latest/download/mops-x86_64-linux -O /tmp/mops
+          chmod +x /tmp/mops
+          sudo mv /tmp/mops /usr/local/bin/mops
+
+      - name: Check mops installation
+        run: mops --version
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
