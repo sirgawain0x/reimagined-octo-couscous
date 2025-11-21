@@ -120,6 +120,11 @@ jobs:
   canister-tests:
     name: Canister Tests
     runs-on: ubuntu-latest
+    env:
+      VITE_CANISTER_ID_REWARDS: rrkah-fqaaa-aaaaa-aaaaq-cai
+      VITE_CANISTER_ID_PORTFOLIO: rrkah-fqaaa-aaaaa-aaaaq-cai
+      VITE_CANISTER_ID_SWAP: rrkah-fqaaa-aaaaa-aaaaq-cai
+      VITE_CANISTER_ID_LENDING: rrkah-fqaaa-aaaaa-aaaaq-cai
     
     steps:
       - name: Checkout code
@@ -146,50 +151,79 @@ jobs:
 
       - name: Install Motoko Package Manager (mops)
         run: |
-          echo "Fetching latest mops release info..."
-          RELEASE_JSON=$(curl -s https://api.github.com/repos/dfinity/mops/releases/latest)
-          
-          if [ -z "$RELEASE_JSON" ]; then
-            echo "Failed to fetch release info from GitHub API"
-            exit 1
-          fi
-          
-          # Try using jq if available (more reliable), otherwise use grep
-          if command -v jq &> /dev/null; then
-            MOPS_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name | contains("linux") and (contains("x86_64") or contains("amd64"))) | .browser_download_url' | head -n 1)
-          else
-            # Fallback to grep - try multiple possible asset name patterns
-            # Pattern 1: mops-x86_64-linux or mops-x86-64-linux
-            MOPS_URL=$(echo "$RELEASE_JSON" | grep -o '"browser_download_url":"[^"]*mops[-_]x86[-_]64[-_]linux[^"]*"' | cut -d '"' -f 4 | head -n 1)
-            if [ -z "$MOPS_URL" ]; then
-              # Pattern 2: mops-linux-x86_64 or mops-linux-x86-64
-              MOPS_URL=$(echo "$RELEASE_JSON" | grep -o '"browser_download_url":"[^"]*mops[-_]linux[-_]x86[-_]64[^"]*"' | cut -d '"' -f 4 | head -n 1)
+          set -euo pipefail
+
+          # Ensure required tools are present
+          sudo apt-get update -y
+          sudo apt-get install -y curl jq
+
+          # Try well-known redirect URLs first (avoid API rate limits / 404s)
+          try_urls=(
+            "https://github.com/dfinity/mops/releases/latest/download/mops-x86_64-linux"
+            "https://github.com/dfinity/mops/releases/latest/download/mops-amd64-linux"
+            "https://github.com/dfinity/mops/releases/latest/download/mops-linux"
+          )
+
+          installed=false
+          for url in "${try_urls[@]}"; do
+            echo "Trying direct download: $url"
+            if curl -fsSL "$url" -o /tmp/mops; then
+              chmod +x /tmp/mops
+              sudo mv /tmp/mops /usr/local/bin/mops
+              installed=true
+              echo "Installed mops from $url"
+              break
+            else
+              echo "Direct download failed for $url"
             fi
-            if [ -z "$MOPS_URL" ]; then
-              # Pattern 3: Generic linux x86_64 match
-              MOPS_URL=$(echo "$RELEASE_JSON" | grep -o '"browser_download_url":"[^"]*mops[^"]*linux[^"]*x86[^"]*64[^"]*"' | cut -d '"' -f 4 | head -n 1)
+          done
+
+          # Fallback: use GitHub API + jq (use GITHUB_TOKEN when available to avoid rate limits)
+          if [ "$installed" = false ]; then
+            echo "Direct downloads failed — falling back to GitHub API"
+            AUTH_HEADER=""
+            if [ -n "${GITHUB_TOKEN:-}" ]; then
+              AUTH_HEADER="-H \"Authorization: token ${GITHUB_TOKEN}\""
+            fi
+
+            # fetch release JSON (authenticated when possible)
+            # shellcheck disable=SC2086
+            LATEST_JSON=$(eval curl -sS $AUTH_HEADER https://api.github.com/repos/dfinity/mops/releases/latest || true)
+
+            if [ -z "$LATEST_JSON" ]; then
+              echo "Failed to fetch release info from GitHub API"
+            else
+              echo "Parsing release JSON (truncated):"
+              echo "$LATEST_JSON" | head -c 800
+
+              # Prefer linux amd64/x86_64 asset
+              MOPS_URL=$(echo "$LATEST_JSON" | jq -r '.assets[]? | select(.name|test("linux";"i") and (.name|test("x86_64|amd64";"i"))) | .browser_download_url' | head -n1 || true)
+
+              # Fallback to any linux asset
+              if [ -z "$MOPS_URL" ]; then
+                MOPS_URL=$(echo "$LATEST_JSON" | jq -r '.assets[]? | select(.name|test("linux";"i")) | .browser_download_url' | head -n1 || true)
+              fi
+
+              if [ -n "$MOPS_URL" ] && curl -fsSL "$MOPS_URL" -o /tmp/mops; then
+                chmod +x /tmp/mops
+                sudo mv /tmp/mops /usr/local/bin/mops
+                installed=true
+                echo "Installed mops from API asset: $MOPS_URL"
+              else
+                echo "No suitable mops asset found in release. Available assets (first 20):"
+                echo "$LATEST_JSON" | jq -r '.assets[]?.name' | head -n20 || true
+              fi
             fi
           fi
-          
-          if [ -z "$MOPS_URL" ]; then
-            echo "Failed to find mops download URL in release assets"
-            echo "Release API response (first 1000 chars):"
-            echo "$RELEASE_JSON" | head -c 1000
+
+          if [ "$installed" = false ]; then
             echo ""
-            echo "Available assets:"
-            echo "$RELEASE_JSON" | grep -o '"name":"[^"]*"' | head -n 10
+            echo "ERROR: Unable to install mops. The release/latest endpoint may be returning 404 or no suitable asset exists."
+            echo "Remedies:"
+            echo "- Pin to a known release tag: https://github.com/dfinity/mops/releases/download/vX.Y.Z/mops-x86_64-linux"
+            echo "- Vendor the binary in your CI artifacts or internal registry."
             exit 1
           fi
-          
-          echo "Found mops download URL: $MOPS_URL"
-          echo "Downloading mops..."
-          wget -q --show-progress "$MOPS_URL" -O /tmp/mops || {
-            echo "Failed to download mops binary"
-            exit 1
-          }
-          
-          chmod +x /tmp/mops
-          sudo mv /tmp/mops /usr/local/bin/mops
 
       - name: Check mops installation
         run: mops --version
