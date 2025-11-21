@@ -125,6 +125,7 @@ jobs:
       VITE_CANISTER_ID_PORTFOLIO: rrkah-fqaaa-aaaaa-aaaaq-cai
       VITE_CANISTER_ID_SWAP: rrkah-fqaaa-aaaaa-aaaaq-cai
       VITE_CANISTER_ID_LENDING: rrkah-fqaaa-aaaaa-aaaaq-cai
+      MOPS_VERSION: v1.12.0
     
     steps:
       - name: Checkout code
@@ -150,78 +151,87 @@ jobs:
           dfx --version
 
       - name: Install Motoko Package Manager (mops)
+        env:
+          # Set this in your workflow or repository secrets to a known mops release tag, e.g. vX.Y.Z
+          # If empty, the step will try "latest" heuristics (less reliable).
+          MOPS_VERSION: ${{ env.MOPS_VERSION || '' }}
         run: |
           set -euo pipefail
 
-          # Ensure required tools are present
           sudo apt-get update -y
           sudo apt-get install -y curl jq
 
-          # Try well-known redirect URLs first (avoid API rate limits / 404s)
-          try_urls=(
-            "https://github.com/dfinity/mops/releases/latest/download/mops-x86_64-linux"
-            "https://github.com/dfinity/mops/releases/latest/download/mops-amd64-linux"
-            "https://github.com/dfinity/mops/releases/latest/download/mops-linux"
-          )
-
           installed=false
-          for url in "${try_urls[@]}"; do
-            echo "Trying direct download: $url"
-            if curl -fsSL "$url" -o /tmp/mops; then
+
+          # If a specific release tag is provided, prefer the pinned download (recommended)
+          if [ -n "${MOPS_VERSION:-}" ]; then
+            echo "MOPS_VERSION provided: ${MOPS_VERSION}"
+            PINNED_URL="https://github.com/dfinity/mops/releases/download/${MOPS_VERSION}/mops-x86_64-linux"
+            echo "Attempting pinned download: $PINNED_URL"
+            if curl -fsSL "$PINNED_URL" -o /tmp/mops; then
               chmod +x /tmp/mops
               sudo mv /tmp/mops /usr/local/bin/mops
               installed=true
-              echo "Installed mops from $url"
-              break
+              echo "Installed mops from pinned release ${MOPS_VERSION}"
             else
-              echo "Direct download failed for $url"
+              echo "Pinned download failed for $PINNED_URL"
             fi
-          done
+          fi
 
-          # Fallback: use GitHub API + jq (use GITHUB_TOKEN when available to avoid rate limits)
+          # If no pinned version or pinned download failed, try common "latest" redirect paths and API fallback
           if [ "$installed" = false ]; then
-            echo "Direct downloads failed — falling back to GitHub API"
-            AUTH_HEADER=""
-            if [ -n "${GITHUB_TOKEN:-}" ]; then
-              AUTH_HEADER="-H \"Authorization: token ${GITHUB_TOKEN}\""
-            fi
+            try_urls=(
+              "https://github.com/dfinity/mops/releases/latest/download/mops-x86_64-linux"
+              "https://github.com/dfinity/mops/releases/latest/download/mops-amd64-linux"
+              "https://github.com/dfinity/mops/releases/latest/download/mops-linux"
+            )
 
-            # fetch release JSON (authenticated when possible)
-            # shellcheck disable=SC2086
-            LATEST_JSON=$(eval curl -sS $AUTH_HEADER https://api.github.com/repos/dfinity/mops/releases/latest || true)
-
-            if [ -z "$LATEST_JSON" ]; then
-              echo "Failed to fetch release info from GitHub API"
-            else
-              echo "Parsing release JSON (truncated):"
-              echo "$LATEST_JSON" | head -c 800
-
-              # Prefer linux amd64/x86_64 asset
-              MOPS_URL=$(echo "$LATEST_JSON" | jq -r '.assets[]? | select(.name|test("linux";"i") and (.name|test("x86_64|amd64";"i"))) | .browser_download_url' | head -n1 || true)
-
-              # Fallback to any linux asset
-              if [ -z "$MOPS_URL" ]; then
-                MOPS_URL=$(echo "$LATEST_JSON" | jq -r '.assets[]? | select(.name|test("linux";"i")) | .browser_download_url' | head -n1 || true)
-              fi
-
-              if [ -n "$MOPS_URL" ] && curl -fsSL "$MOPS_URL" -o /tmp/mops; then
+            for url in "${try_urls[@]}"; do
+              echo "Trying direct download: $url"
+              if curl -fsSL "$url" -o /tmp/mops; then
                 chmod +x /tmp/mops
                 sudo mv /tmp/mops /usr/local/bin/mops
                 installed=true
-                echo "Installed mops from API asset: $MOPS_URL"
+                echo "Installed mops from $url"
+                break
               else
-                echo "No suitable mops asset found in release. Available assets (first 20):"
-                echo "$LATEST_JSON" | jq -r '.assets[]?.name' | head -n20 || true
+                echo "Direct download failed for $url"
+              fi
+            done
+
+            if [ "$installed" = false ]; then
+              echo "Direct downloads failed — falling back to GitHub API (may be rate limited / return 404)"
+              LATEST_JSON=$(curl -sS https://api.github.com/repos/dfinity/mops/releases/latest || true)
+              if [ -n "$LATEST_JSON" ]; then
+                echo "Parsing release JSON (truncated):"
+                echo "$LATEST_JSON" | head -c 800
+                MOPS_URL=$(echo "$LATEST_JSON" | jq -r '.assets[]? | select(.name|test("linux";"i") and (.name|test("x86_64|amd64";"i"))) | .browser_download_url' | head -n1 || true)
+                if [ -z "$MOPS_URL" ]; then
+                  MOPS_URL=$(echo "$LATEST_JSON" | jq -r '.assets[]? | select(.name|test("linux";"i")) | .browser_download_url' | head -n1 || true)
+                fi
+                if [ -n "$MOPS_URL" ] && curl -fsSL "$MOPS_URL" -o /tmp/mops; then
+                  chmod +x /tmp/mops
+                  sudo mv /tmp/mops /usr/local/bin/mops
+                  installed=true
+                  echo "Installed mops from API asset: $MOPS_URL"
+                else
+                  echo "No suitable mops asset found in release. Available asset names (first 20):"
+                  echo "$LATEST_JSON" | jq -r '.assets[]?.name' | head -n20 || true
+                fi
+              else
+                echo "GitHub API fetch returned empty or failed (possible 404 or network issue)."
               fi
             fi
           fi
 
           if [ "$installed" = false ]; then
             echo ""
-            echo "ERROR: Unable to install mops. The release/latest endpoint may be returning 404 or no suitable asset exists."
-            echo "Remedies:"
-            echo "- Pin to a known release tag: https://github.com/dfinity/mops/releases/download/vX.Y.Z/mops-x86_64-linux"
-            echo "- Vendor the binary in your CI artifacts or internal registry."
+            echo "ERROR: Unable to install mops."
+            echo "Recommended actions:"
+            echo "- Pin MOPS_VERSION in this workflow to a working release tag. Find tags here:"
+            echo "  https://github.com/dfinity/mops/releases"
+            echo "- Or vendor the mops binary into your repo or an internal artifact server and download from there."
+            echo "- If you expect the 'latest' endpoint to work, inspect the releases page to confirm assets exist."
             exit 1
           fi
 
