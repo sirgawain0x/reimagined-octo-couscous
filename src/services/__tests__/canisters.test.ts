@@ -11,8 +11,21 @@ import { createMockPrincipal } from '@/test/setup'
 
 // Mock ICP service
 vi.mock('../icp', () => ({
-  getIdentity: vi.fn(),
-  createActor: vi.fn(),
+  getAgent: vi.fn(() => null),
+  getAnonymousAgent: vi.fn(async () => ({})),
+  createAuthClient: vi.fn(async () => ({
+    create: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
+    isAuthenticated: vi.fn(() => false),
+  })),
+  getIdentity: vi.fn(async () => null),
+  createActor: vi.fn(async () => ({})),
+  login: vi.fn(async () => null),
+  logout: vi.fn(async () => {}),
+  loginWithBitcoin: vi.fn(async () => null),
+  loginWithBitcoinWallet: vi.fn(async () => null),
+  setBitcoinIdentity: vi.fn(async () => {}),
 }))
 
 describe('canisters service', () => {

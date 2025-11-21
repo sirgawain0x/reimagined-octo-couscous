@@ -6,6 +6,12 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    env: {
+      VITE_CANISTER_ID_REWARDS: process.env.VITE_CANISTER_ID_REWARDS || 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+      VITE_CANISTER_ID_PORTFOLIO: process.env.VITE_CANISTER_ID_PORTFOLIO || 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+      VITE_CANISTER_ID_SWAP: process.env.VITE_CANISTER_ID_SWAP || 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+      VITE_CANISTER_ID_LENDING: process.env.VITE_CANISTER_ID_LENDING || 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
@@ -23,6 +29,12 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+  },
+  define: {
+    'import.meta.env.VITE_CANISTER_ID_REWARDS': JSON.stringify(process.env.VITE_CANISTER_ID_REWARDS || 'rrkah-fqaaa-aaaaa-aaaaq-cai'),
+    'import.meta.env.VITE_CANISTER_ID_PORTFOLIO': JSON.stringify(process.env.VITE_CANISTER_ID_PORTFOLIO || 'rrkah-fqaaa-aaaaa-aaaaq-cai'),
+    'import.meta.env.VITE_CANISTER_ID_SWAP': JSON.stringify(process.env.VITE_CANISTER_ID_SWAP || 'rrkah-fqaaa-aaaaa-aaaaq-cai'),
+    'import.meta.env.VITE_CANISTER_ID_LENDING': JSON.stringify(process.env.VITE_CANISTER_ID_LENDING || 'rrkah-fqaaa-aaaaa-aaaaq-cai'),
   },
 })
 
