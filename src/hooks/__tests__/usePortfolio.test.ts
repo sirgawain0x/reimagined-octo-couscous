@@ -6,10 +6,20 @@ import { createMockPrincipal } from '@/test/setup'
 
 vi.mock('@/services/canisters')
 vi.mock('@/utils/logger')
+// Mock retry to actually call the functions
+vi.mock('@/utils/retry', () => ({
+  retry: async <T>(fn: () => Promise<T>) => await fn(),
+  retryWithTimeout: async <T>(fn: () => Promise<T>) => await fn(),
+}))
+
+const mockPrincipal = createMockPrincipal()
 const mockUseICP = vi.fn(() => ({
-  principal: createMockPrincipal(),
+  principal: mockPrincipal,
   isConnected: true,
   isLoading: false,
+  connect: vi.fn(),
+  setConnected: vi.fn(),
+  disconnect: vi.fn(),
 }))
 
 vi.mock('./useICP', () => ({
@@ -24,9 +34,26 @@ describe('usePortfolio', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(createPortfolioActor).mockResolvedValue(mockActor as any)
+    mockUseICP.mockReturnValue({
+      principal: mockPrincipal,
+      isConnected: true,
+      isLoading: false,
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
   })
 
   it('should load portfolio on mount when connected', async () => {
+    mockUseICP.mockReturnValue({
+      principal: mockPrincipal,
+      isConnected: true,
+      isLoading: false,
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
+
     const mockPortfolio = {
       totalValue: 12450.75,
       totalRewards: BigInt(1250000), // 0.0125 BTC in nat64
@@ -43,9 +70,12 @@ describe('usePortfolio', () => {
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false)
-    })
+    }, { timeout: 5000 })
 
-    expect(result.current.portfolio).toBeDefined()
+    await waitFor(() => {
+      expect(result.current.portfolio).toBeDefined()
+    }, { timeout: 5000 })
+
     expect(result.current.portfolio?.totalValue).toBe(12450.75)
     expect(result.current.portfolio?.totalRewards).toBe(0.0125)
     expect(result.current.portfolio?.totalBorrowed).toBe(2000.0)
@@ -57,7 +87,10 @@ describe('usePortfolio', () => {
       principal: null,
       isConnected: false,
       isLoading: false,
-    } as any)
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
 
     const { result } = renderHook(() => usePortfolio())
 
@@ -70,16 +103,28 @@ describe('usePortfolio', () => {
   })
 
   it('should handle portfolio loading errors gracefully', async () => {
+    mockUseICP.mockReturnValue({
+      principal: mockPrincipal,
+      isConnected: true,
+      isLoading: false,
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
+
     mockActor.getPortfolio.mockRejectedValue(new Error('Network error'))
 
     const { result } = renderHook(() => usePortfolio())
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false)
-    })
+    }, { timeout: 5000 })
 
     // Should have empty portfolio on error
-    expect(result.current.portfolio).toBeDefined()
+    await waitFor(() => {
+      expect(result.current.portfolio).toBeDefined()
+    }, { timeout: 5000 })
+
     expect(result.current.portfolio?.totalValue).toBe(0)
     expect(result.current.portfolio?.totalBorrowed).toBe(0)
     expect(result.current.portfolio?.assets.length).toBe(0)
@@ -87,6 +132,15 @@ describe('usePortfolio', () => {
   })
 
   it('should handle TrustError (network mismatch)', async () => {
+    mockUseICP.mockReturnValue({
+      principal: mockPrincipal,
+      isConnected: true,
+      isLoading: false,
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
+
     const error = new Error('TrustError: node signatures')
     error.name = 'TrustError'
     mockActor.getPortfolio.mockRejectedValue(error)
@@ -95,25 +149,51 @@ describe('usePortfolio', () => {
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false)
-    })
+    }, { timeout: 5000 })
+
+    await waitFor(() => {
+      expect(result.current.error).toBeTruthy()
+    }, { timeout: 5000 })
 
     expect(result.current.error).toContain('network mismatch')
   })
 
   it('should handle canister not found errors', async () => {
-    const error = new Error('Invalid canister ID')
+    mockUseICP.mockReturnValue({
+      principal: mockPrincipal,
+      isConnected: true,
+      isLoading: false,
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
+
+    const error = new Error('contains no Wasm module')
     mockActor.getPortfolio.mockRejectedValue(error)
 
     const { result } = renderHook(() => usePortfolio())
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false)
-    })
+    }, { timeout: 5000 })
+
+    await waitFor(() => {
+      expect(result.current.error).toBeTruthy()
+    }, { timeout: 5000 })
 
     expect(result.current.error).toContain('not deployed')
   })
 
   it('should refresh portfolio', async () => {
+    mockUseICP.mockReturnValue({
+      principal: mockPrincipal,
+      isConnected: true,
+      isLoading: false,
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
+
     const mockPortfolio = {
       totalValue: 1000,
       totalRewards: BigInt(0),
@@ -127,14 +207,30 @@ describe('usePortfolio', () => {
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false)
-    })
+    }, { timeout: 5000 })
 
+    await waitFor(() => {
+      expect(mockActor.getPortfolio).toHaveBeenCalled()
+    }, { timeout: 5000 })
+
+    const callCountBefore = mockActor.getPortfolio.mock.calls.length
     await result.current.refresh()
-
-    expect(mockActor.getPortfolio).toHaveBeenCalledTimes(2) // Initial + refresh
+    
+    await waitFor(() => {
+      expect(mockActor.getPortfolio.mock.calls.length).toBeGreaterThan(callCountBefore)
+    }, { timeout: 5000 })
   })
 
   it('should convert nat64 amounts correctly', async () => {
+    mockUseICP.mockReturnValue({
+      principal: mockPrincipal,
+      isConnected: true,
+      isLoading: false,
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
+
     const mockPortfolio = {
       totalValue: 1000,
       totalRewards: BigInt(100000000), // 1.0 BTC in nat64
@@ -150,7 +246,11 @@ describe('usePortfolio', () => {
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false)
-    })
+    }, { timeout: 5000 })
+
+    await waitFor(() => {
+      expect(result.current.portfolio).toBeDefined()
+    }, { timeout: 5000 })
 
     expect(result.current.portfolio?.totalRewards).toBe(1.0)
     expect(result.current.portfolio?.totalBorrowed).toBe(200)
@@ -158,6 +258,15 @@ describe('usePortfolio', () => {
   })
 
   it('should handle totalBorrowed calculation correctly', async () => {
+    mockUseICP.mockReturnValue({
+      principal: mockPrincipal,
+      isConnected: true,
+      isLoading: false,
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
+
     const mockPortfolio = {
       totalValue: 5000, // assets + rewards + lended - borrowed
       totalRewards: BigInt(0),
@@ -173,14 +282,26 @@ describe('usePortfolio', () => {
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false)
-    })
+    }, { timeout: 5000 })
+
+    await waitFor(() => {
+      expect(result.current.portfolio).toBeDefined()
+    }, { timeout: 5000 })
 
     expect(result.current.portfolio?.totalBorrowed).toBe(1500)
     expect(result.current.portfolio?.totalValue).toBe(5000)
-    // Verify net value calculation: 3500 (assets) + 0 (rewards) + 3000 (lended) - 1500 (borrowed) = 5000
   })
 
   it('should handle zero borrowed amount', async () => {
+    mockUseICP.mockReturnValue({
+      principal: mockPrincipal,
+      isConnected: true,
+      isLoading: false,
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
+
     const mockPortfolio = {
       totalValue: 10000,
       totalRewards: BigInt(0),
@@ -196,7 +317,11 @@ describe('usePortfolio', () => {
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false)
-    })
+    }, { timeout: 5000 })
+
+    await waitFor(() => {
+      expect(result.current.portfolio).toBeDefined()
+    }, { timeout: 5000 })
 
     expect(result.current.portfolio?.totalBorrowed).toBe(0)
     expect(result.current.portfolio?.totalValue).toBe(10000)

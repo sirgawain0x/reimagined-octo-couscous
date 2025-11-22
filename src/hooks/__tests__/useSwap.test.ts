@@ -6,12 +6,22 @@ import { createMockPrincipal } from '@/test/setup'
 
 vi.mock('@/services/canisters')
 vi.mock('@/utils/logger')
-vi.mock('@/utils/retry')
-vi.mock('@/utils/rateLimiter')
+// Mock retry to actually call the functions
+vi.mock('@/utils/retry', () => ({
+  retry: async <T>(fn: () => Promise<T>) => await fn(),
+  retryWithTimeout: async <T>(fn: () => Promise<T>) => await fn(),
+}))
+vi.mock('@/utils/rateLimiter', () => ({
+  checkRateLimit: vi.fn(),
+}))
+const mockPrincipal = createMockPrincipal()
 const mockUseICP = vi.fn(() => ({
-  principal: createMockPrincipal(),
+  principal: mockPrincipal,
   isConnected: true,
   isLoading: false,
+  connect: vi.fn(),
+  setConnected: vi.fn(),
+  disconnect: vi.fn(),
 }))
 
 vi.mock('./useICP', () => ({
@@ -33,6 +43,14 @@ describe('useSwap', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(createSwapActor).mockResolvedValue(mockActor as any)
+    mockUseICP.mockReturnValue({
+      principal: mockPrincipal,
+      isConnected: true,
+      isLoading: false,
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
   })
 
   it('should load pools on mount', async () => {
@@ -138,7 +156,10 @@ describe('useSwap', () => {
       principal: null,
       isConnected: false,
       isLoading: false,
-    } as any)
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
 
     const { result } = renderHook(() => useSwap())
 
@@ -156,7 +177,7 @@ describe('useSwap', () => {
     const mockHistory = [
       {
         id: BigInt(1),
-        user: createMockPrincipal(),
+        user: mockPrincipal,
         tokenIn: { ckBTC: null },
         tokenOut: { ICP: null },
         amountIn: BigInt(1000),
@@ -174,7 +195,7 @@ describe('useSwap', () => {
 
     const history = await result.current.getSwapHistory()
 
-    expect(mockActor.getSwapHistory).toHaveBeenCalled()
+    expect(mockActor.getSwapHistory).toHaveBeenCalledWith(mockPrincipal)
     expect(history.length).toBe(1)
     expect(history[0].tokenIn).toBe('ckBTC')
     expect(history[0].tokenOut).toBe('ICP')
@@ -185,7 +206,10 @@ describe('useSwap', () => {
       principal: null,
       isConnected: false,
       isLoading: false,
-    } as any)
+      connect: vi.fn(),
+      setConnected: vi.fn(),
+      disconnect: vi.fn(),
+    })
 
     const { result } = renderHook(() => useSwap())
 

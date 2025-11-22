@@ -1,15 +1,25 @@
 import { ArrowRight } from "lucide-react"
 import { useRewards } from "@/hooks/useRewards"
 import { logInfo } from "@/utils/logger"
+import type { Store } from "@/types"
 
 function ShopView() {
   const { stores, isLoading } = useRewards()
 
-  function handleShopNow(storeName: string) {
-    logInfo("User initiated shopping", { storeName })
-    // In a real app, this would open a tracked link and call trackPurchase when purchase completes
+  function handleShopNow(store: Store) {
+    logInfo("User initiated shopping", { storeName: store.name, storeId: store.id })
+    
+    if (store.url) {
+      // Open affiliate link in new tab
+      window.open(store.url, "_blank", "noopener,noreferrer")
+    } else {
+      // Fallback: log warning if no URL is available
+      logInfo("Store URL not available", { storeName: store.name })
+    }
+    
+    // In a real app, this would also call trackPurchase when purchase completes
     // const { trackPurchase } = useRewards()
-    // await trackPurchase(storeId, purchaseAmount)
+    // await trackPurchase(store.id, purchaseAmount)
   }
 
   if (isLoading) {
@@ -38,7 +48,7 @@ function ShopView() {
               <h3 className="text-xl font-bold text-white mb-2">{store.name}</h3>
               <p className="text-lg font-semibold text-yellow-400 mb-4">Up to {store.reward}% BTC Back</p>
               <button
-                onClick={() => handleShopNow(store.name)}
+                onClick={() => handleShopNow(store)}
                 className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-blue-500 transition-colors"
               >
                 Shop Now <ArrowRight className="h-4 w-4" />

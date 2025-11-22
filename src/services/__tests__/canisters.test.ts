@@ -40,41 +40,79 @@ describe('canisters service', () => {
 
   describe('createLendingActor', () => {
     it('should create lending actor with valid canister ID', async () => {
-      process.env.VITE_CANISTER_ID_LENDING = 'test-canister-id'
+      // Use a valid Principal ID format
+      const validCanisterId = 'rrkah-fqaaa-aaaaa-aaaaq-cai'
+      process.env.VITE_CANISTER_ID_LENDING = validCanisterId
+      
+      // Reload module to get fresh config
+      await vi.resetModules()
+      const { createLendingActor: createLendingActorReloaded } = await import('../canisters')
       const { createActor } = await import('../icp')
       vi.mocked(createActor).mockResolvedValue(mockActor as any)
 
-      const actor = await createLendingActor()
+      const actor = await createLendingActorReloaded()
 
       expect(createActor).toHaveBeenCalled()
       expect(actor).toBeDefined()
     })
 
     it('should throw error if canister ID not configured', async () => {
-      delete process.env.VITE_CANISTER_ID_LENDING
+      // Mock config with empty canister ID
+      await vi.resetModules()
+      vi.doMock('@/config/env', () => ({
+        ICP_CONFIG: {
+          network: 'local',
+          internetIdentityUrl: 'https://identity.ic0.app',
+          canisterIds: {
+            icSiwbProvider: 'be2us-64aaa-aaaaa-qaabq-cai',
+            rewards: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+            lending: '', // Empty canister ID
+            portfolio: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+            swap: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+          },
+        },
+        isLocalNetwork: true,
+        host: 'http://localhost:4943',
+      }))
+      
+      const { createLendingActor: createLendingActorReloaded } = await import('../canisters')
 
-      await expect(createLendingActor()).rejects.toThrow('Lending canister ID not configured')
+      await expect(createLendingActorReloaded()).rejects.toThrow('Lending canister ID not configured')
+      
+      vi.doUnmock('@/config/env')
     })
   })
 
   describe('createSwapActor', () => {
     it('should create swap actor with valid canister ID', async () => {
-      process.env.VITE_CANISTER_ID_SWAP = 'test-canister-id'
+      // Use a valid Principal ID format
+      const validCanisterId = 'rrkah-fqaaa-aaaaa-aaaaq-cai'
+      process.env.VITE_CANISTER_ID_SWAP = validCanisterId
+      
+      // Reload module to get fresh config
+      await vi.resetModules()
+      const { createSwapActor: createSwapActorReloaded } = await import('../canisters')
       const { createActor } = await import('../icp')
       vi.mocked(createActor).mockResolvedValue(mockActor as any)
 
-      const actor = await createSwapActor()
+      const actor = await createSwapActorReloaded()
 
       expect(createActor).toHaveBeenCalled()
       expect(actor).toBeDefined()
     })
 
     it('should allow anonymous access for query methods', async () => {
-      process.env.VITE_CANISTER_ID_SWAP = 'test-canister-id'
+      // Use a valid Principal ID format
+      const validCanisterId = 'rrkah-fqaaa-aaaaa-aaaaq-cai'
+      process.env.VITE_CANISTER_ID_SWAP = validCanisterId
+      
+      // Reload module to get fresh config
+      await vi.resetModules()
+      const { createSwapActor: createSwapActorReloaded } = await import('../canisters')
       const { createActor } = await import('../icp')
       vi.mocked(createActor).mockResolvedValue(mockActor as any)
 
-      const actor = await createSwapActor(true)
+      const actor = await createSwapActorReloaded(true)
 
       expect(createActor).toHaveBeenCalled()
       expect(actor).toBeDefined()
@@ -83,11 +121,17 @@ describe('canisters service', () => {
 
   describe('createRewardsActor', () => {
     it('should create rewards actor with valid canister ID', async () => {
-      process.env.VITE_CANISTER_ID_REWARDS = 'test-canister-id'
+      // Use a valid Principal ID format
+      const validCanisterId = 'rrkah-fqaaa-aaaaa-aaaaq-cai'
+      process.env.VITE_CANISTER_ID_REWARDS = validCanisterId
+      
+      // Reload module to get fresh config
+      await vi.resetModules()
+      const { createRewardsActor: createRewardsActorReloaded } = await import('../canisters')
       const { createActor } = await import('../icp')
       vi.mocked(createActor).mockResolvedValue(mockActor as any)
 
-      const actor = await createRewardsActor()
+      const actor = await createRewardsActorReloaded()
 
       expect(createActor).toHaveBeenCalled()
       expect(actor).toBeDefined()
@@ -96,11 +140,17 @@ describe('canisters service', () => {
 
   describe('createPortfolioActor', () => {
     it('should create portfolio actor with valid canister ID', async () => {
-      process.env.VITE_CANISTER_ID_PORTFOLIO = 'test-canister-id'
+      // Use a valid Principal ID format
+      const validCanisterId = 'rrkah-fqaaa-aaaaa-aaaaq-cai'
+      process.env.VITE_CANISTER_ID_PORTFOLIO = validCanisterId
+      
+      // Reload module to get fresh config
+      await vi.resetModules()
+      const { createPortfolioActor: createPortfolioActorReloaded } = await import('../canisters')
       const { createActor } = await import('../icp')
       vi.mocked(createActor).mockResolvedValue(mockActor as any)
 
-      const actor = await createPortfolioActor()
+      const actor = await createPortfolioActorReloaded()
 
       expect(createActor).toHaveBeenCalled()
       expect(actor).toBeDefined()
@@ -110,9 +160,7 @@ describe('canisters service', () => {
   describe('requireAuth', () => {
     it('should return principal if authenticated', async () => {
       const { getIdentity } = await import('../icp')
-      vi.mocked(getIdentity).mockResolvedValue({
-        getPrincipal: vi.fn().mockResolvedValue(mockPrincipal),
-      } as any)
+      vi.mocked(getIdentity).mockResolvedValue(mockPrincipal)
 
       const principal = await requireAuth()
 
@@ -129,17 +177,43 @@ describe('canisters service', () => {
 
   describe('error handling', () => {
     it('should handle actor creation errors gracefully', async () => {
-      process.env.VITE_CANISTER_ID_REWARDS = 'test-canister-id'
+      // Use a valid Principal ID format
+      const validCanisterId = 'rrkah-fqaaa-aaaaa-aaaaq-cai'
+      process.env.VITE_CANISTER_ID_REWARDS = validCanisterId
+      
+      // Reload module to get fresh config
+      await vi.resetModules()
+      const { createRewardsActor: createRewardsActorReloaded } = await import('../canisters')
       const { createActor } = await import('../icp')
       vi.mocked(createActor).mockRejectedValue(new Error('Network error'))
 
-      await expect(createRewardsActor()).rejects.toThrow()
+      await expect(createRewardsActorReloaded()).rejects.toThrow()
     })
 
     it('should handle missing canister IDs with clear error messages', async () => {
-      delete process.env.VITE_CANISTER_ID_REWARDS
+      // Mock config with empty canister ID
+      await vi.resetModules()
+      vi.doMock('@/config/env', () => ({
+        ICP_CONFIG: {
+          network: 'local',
+          internetIdentityUrl: 'https://identity.ic0.app',
+          canisterIds: {
+            icSiwbProvider: 'be2us-64aaa-aaaaa-qaabq-cai',
+            rewards: '', // Empty canister ID
+            lending: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+            portfolio: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+            swap: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+          },
+        },
+        isLocalNetwork: true,
+        host: 'http://localhost:4943',
+      }))
+      
+      const { createRewardsActor: createRewardsActorReloaded } = await import('../canisters')
 
-      await expect(createRewardsActor()).rejects.toThrow('Rewards canister ID not configured')
+      await expect(createRewardsActorReloaded()).rejects.toThrow('Rewards canister ID not configured')
+      
+      vi.doUnmock('@/config/env')
     })
   })
 })

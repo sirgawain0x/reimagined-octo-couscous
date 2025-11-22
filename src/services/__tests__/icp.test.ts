@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { Principal, HttpAgent, AnonymousIdentity } from '@dfinity/agent'
 import { AuthClient } from '@dfinity/auth-client'
+import { createMockPrincipal } from '@/test/setup'
+
+// Mock dependencies
+vi.mock('@dfinity/auth-client')
+vi.mock('@dfinity/agent')
+
+// Note: @/config/env is mocked in src/test/setup.ts to ensure it's applied before any imports
+
 import {
   getAgent,
   getAnonymousAgent,
@@ -10,11 +18,6 @@ import {
   getIdentity,
   createActor,
 } from '../icp'
-import { createMockPrincipal } from '@/test/setup'
-
-// Mock dependencies
-vi.mock('@dfinity/auth-client')
-vi.mock('@dfinity/agent')
 
 describe('ICP service', () => {
   beforeEach(() => {
@@ -45,54 +48,104 @@ describe('ICP service', () => {
 
   describe('createAuthClient', () => {
     it('should create auth client successfully', async () => {
+      // Set up Internet Identity URL for this test
+      const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
+      process.env.VITE_INTERNET_IDENTITY_URL = 'http://localhost:4943?canisterId=rdmx6-jaaaa-aaaaa-aaaq-cai'
+
+      await vi.resetModules()
+      // Re-mock after reset
+      vi.mocked(AuthClient.create).mockClear()
+      
+      const { createAuthClient: createAuthClientReloaded } = await import('../icp')
+
       const mockAuthClient = {
         isAuthenticated: vi.fn().mockResolvedValue(true),
+        getIdentity: vi.fn(),
       }
 
       vi.mocked(AuthClient.create).mockResolvedValue(mockAuthClient as any)
 
-      const client = await createAuthClient()
+      const client = await createAuthClientReloaded()
 
       expect(AuthClient.create).toHaveBeenCalled()
       expect(client).toBe(mockAuthClient)
+
+      if (originalEnv !== undefined) {
+        process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
+      } else {
+        delete process.env.VITE_INTERNET_IDENTITY_URL
+      }
+      // Reset module after test to clear state
+      await vi.resetModules()
     })
 
     it('should return null if Internet Identity URL not configured', async () => {
-      // Mock environment to not have Internet Identity URL
-      const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
-      delete process.env.VITE_INTERNET_IDENTITY_URL
-
-      // Reload the module to get fresh config
+      // Mock config to not have Internet Identity URL
       await vi.resetModules()
+      vi.doMock('@/config/env', () => ({
+        ICP_CONFIG: {
+          network: 'local',
+          internetIdentityUrl: null,
+          canisterIds: {
+            icSiwbProvider: 'be2us-64aaa-aaaaa-qaabq-cai',
+            rewards: '',
+            lending: '',
+            portfolio: '',
+            swap: '',
+          },
+        },
+        isLocalNetwork: true,
+        host: 'http://localhost:4943',
+      }))
+      
       const { createAuthClient: createAuthClientReloaded } = await import('../icp')
 
       const client = await createAuthClientReloaded()
       expect(client).toBeNull()
-
-      process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
+      
+      vi.doUnmock('@/config/env')
     })
 
     it('should return null if Internet Identity canister ID is invalid', async () => {
-      // Mock environment with invalid canister ID
-      const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
-      process.env.VITE_INTERNET_IDENTITY_URL = 'http://localhost:4943?canisterId=rdmx6-jaaaa-aaaah-qcaiq-cai'
-
-      // Reload the module to get fresh config
+      // Mock config with invalid canister ID
       await vi.resetModules()
+      vi.doMock('@/config/env', () => ({
+        ICP_CONFIG: {
+          network: 'local',
+          internetIdentityUrl: 'http://localhost:4943?canisterId=rdmx6-jaaaa-aaaah-qcaiq-cai',
+          canisterIds: {
+            icSiwbProvider: 'be2us-64aaa-aaaaa-qaabq-cai',
+            rewards: '',
+            lending: '',
+            portfolio: '',
+            swap: '',
+          },
+        },
+        isLocalNetwork: true,
+        host: 'http://localhost:4943',
+      }))
+      
       const { createAuthClient: createAuthClientReloaded } = await import('../icp')
 
       const client = await createAuthClientReloaded()
       expect(client).toBeNull()
-
-      process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
+      
+      vi.doUnmock('@/config/env')
     })
   })
 
   describe('getIdentity', () => {
-    it('should return identity if authenticated', async () => {
+    it('should return principal if authenticated', async () => {
+      // Set up Internet Identity URL for this test
+      const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
+      process.env.VITE_INTERNET_IDENTITY_URL = 'http://localhost:4943?canisterId=rdmx6-jaaaa-aaaaa-aaaq-cai'
+
+      await vi.resetModules()
+      vi.mocked(AuthClient.create).mockClear()
+      
       const mockPrincipal = createMockPrincipal()
       const mockIdentity = {
-        getPrincipal: vi.fn().mockResolvedValue(mockPrincipal),
+        getPrincipal: vi.fn().mockReturnValue(mockPrincipal),
       }
 
       // Mock auth client
@@ -103,11 +156,23 @@ describe('ICP service', () => {
 
       vi.mocked(AuthClient.create).mockResolvedValue(mockAuthClient as any)
 
-      await createAuthClient()
-      const identity = await getIdentity()
+      const { createAuthClient: createAuthClientReloaded, getIdentity: getIdentityReloaded } = await import('../icp')
 
-      expect(identity).toBeDefined()
-      expect(identity?.getPrincipal).toBeDefined()
+      // Initialize authClient first
+      await createAuthClientReloaded()
+      
+      // Now getIdentity should use the initialized authClient
+      const principal = await getIdentityReloaded()
+
+      expect(principal).toBeDefined()
+      expect(principal).toBe(mockPrincipal)
+
+      if (originalEnv !== undefined) {
+        process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
+      } else {
+        delete process.env.VITE_INTERNET_IDENTITY_URL
+      }
+      await vi.resetModules()
     })
 
     it('should return null if not authenticated', async () => {
@@ -126,26 +191,75 @@ describe('ICP service', () => {
 
   describe('createActor', () => {
     it('should create actor with identity', async () => {
+      // Set up Internet Identity URL for this test
+      const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
+      process.env.VITE_INTERNET_IDENTITY_URL = 'http://localhost:4943?canisterId=rdmx6-jaaaa-aaaaa-aaaq-cai'
+
+      // Reset modules to clear any cached authClient from previous tests
+      await vi.resetModules()
+      vi.mocked(AuthClient.create).mockClear()
+      
       const mockPrincipal = createMockPrincipal()
       const mockIdentity = {
-        getPrincipal: vi.fn().mockResolvedValue(mockPrincipal),
+        getPrincipal: vi.fn().mockReturnValue(mockPrincipal),
       }
 
       const mockAgent = {
         fetchRootKey: vi.fn().mockResolvedValue(undefined),
       } as any
 
-      vi.mocked(HttpAgent).mockImplementation(() => mockAgent)
-      const Actor = await import('@dfinity/agent')
-      vi.spyOn(Actor, 'Actor').mockReturnValue({} as any)
+      // Import Actor properly
+      const { Actor } = await import('@dfinity/agent')
+      const createActorSpy = vi.spyOn(Actor, 'createActor').mockReturnValue({} as any)
 
-      const actor = await createActor(
+      // Mock authClient to return identity, which will be used to set agent
+      const mockAuthClient = {
+        isAuthenticated: vi.fn().mockResolvedValue(true),
+        getIdentity: vi.fn().mockReturnValue(mockIdentity),
+        login: vi.fn((options) => {
+          // Call onSuccess asynchronously using queueMicrotask
+          queueMicrotask(async () => {
+            await options.onSuccess()
+          })
+        }),
+      }
+      
+      vi.mocked(HttpAgent).mockImplementation(() => mockAgent)
+      // Ensure AuthClient.create returns our mock with login method
+      vi.mocked(AuthClient.create).mockResolvedValue(mockAuthClient as any)
+      
+      // Re-import after reset to get fresh module instances
+      const { login: loginReloaded, createActor: createActorReloaded, getAgent: getAgentReloaded } = await import('../icp')
+      
+      // Initialize agent by calling login() - this sets the module-level agent variable
+      // The top-level config mock provides the Internet Identity URL
+      // login() will call createAuthClient() internally, which should return our mocked authClient
+      const loginResult = await loginReloaded() // This creates and sets the agent via new HttpAgent()
+      
+      // Verify login succeeded
+      expect(loginResult).toBe(mockPrincipal)
+      
+      // Verify agent is set
+      const agent = getAgentReloaded()
+      expect(agent).toBeDefined()
+      expect(agent).toBe(mockAgent)
+
+      // Now agent should be set, so createActor should work
+      const actor = await createActorReloaded(
+        'test-canister-id',
         () => ({} as any),
-        Principal.fromText('test-canister-id'),
-        mockIdentity
+        false
       )
 
+      expect(createActorSpy).toHaveBeenCalled()
       expect(actor).toBeDefined()
+
+      if (originalEnv !== undefined) {
+        process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
+      } else {
+        delete process.env.VITE_INTERNET_IDENTITY_URL
+      }
+      await vi.resetModules()
     })
 
     it('should create actor with anonymous identity when allowAnonymous is true', async () => {
@@ -154,69 +268,136 @@ describe('ICP service', () => {
       } as any
 
       vi.mocked(HttpAgent).mockImplementation(() => mockAgent)
-      const Actor = await import('@dfinity/agent')
-      vi.spyOn(Actor, 'Actor').mockReturnValue({} as any)
+      
+      // Import Actor properly
+      const { Actor } = await import('@dfinity/agent')
+      const createActorSpy = vi.spyOn(Actor, 'createActor').mockReturnValue({} as any)
+
+      // Mock getAnonymousAgent
+      const icpModule = await import('../icp')
+      vi.spyOn(icpModule, 'getAnonymousAgent').mockResolvedValue(mockAgent)
 
       const actor = await createActor(
+        'test-canister-id',
         () => ({} as any),
-        Principal.fromText('test-canister-id'),
-        null,
         true
       )
 
+      expect(createActorSpy).toHaveBeenCalled()
       expect(actor).toBeDefined()
     })
   })
 
   describe('login', () => {
     it('should login successfully', async () => {
+      // Set up Internet Identity URL for this test
+      const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
+      process.env.VITE_INTERNET_IDENTITY_URL = 'http://localhost:4943?canisterId=rdmx6-jaaaa-aaaaa-aaaq-cai'
+
+      await vi.resetModules()
+      vi.mocked(AuthClient.create).mockClear()
+      
       const mockPrincipal = createMockPrincipal()
       const mockIdentity = {
         getPrincipal: vi.fn().mockReturnValue(mockPrincipal),
       }
 
+      const mockAgent = {
+        fetchRootKey: vi.fn().mockResolvedValue(undefined),
+      } as any
+
+      vi.mocked(HttpAgent).mockImplementation(() => mockAgent)
+
       const mockAuthClient = {
         isAuthenticated: vi.fn().mockResolvedValue(true),
         getIdentity: vi.fn().mockReturnValue(mockIdentity),
         login: vi.fn((options) => {
-          options.onSuccess()
+          // Simulate async onSuccess - schedule callback in next microtask
+          // The actual authClient.login() doesn't return a Promise, it just calls callbacks
+          // We use queueMicrotask to schedule onSuccess() to run, but don't return anything
+          // The outer Promise resolves when onSuccess() calls resolve()
+          queueMicrotask(async () => {
+            await options.onSuccess()
+          })
         }),
       }
 
       vi.mocked(AuthClient.create).mockResolvedValue(mockAuthClient as any)
 
-      const principal = await login()
+      const { login: loginReloaded } = await import('../icp')
+
+      const principal = await loginReloaded()
 
       expect(principal).toBe(mockPrincipal)
+
+      if (originalEnv !== undefined) {
+        process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
+      } else {
+        delete process.env.VITE_INTERNET_IDENTITY_URL
+      }
+      await vi.resetModules()
     })
 
     it('should return null if Internet Identity URL not configured', async () => {
-      const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
-      delete process.env.VITE_INTERNET_IDENTITY_URL
-
+      // Mock config to not have Internet Identity URL
       await vi.resetModules()
+      vi.doMock('@/config/env', () => ({
+        ICP_CONFIG: {
+          network: 'local',
+          internetIdentityUrl: null,
+          canisterIds: {
+            icSiwbProvider: 'be2us-64aaa-aaaaa-qaabq-cai',
+            rewards: '',
+            lending: '',
+            portfolio: '',
+            swap: '',
+          },
+        },
+        isLocalNetwork: true,
+        host: 'http://localhost:4943',
+      }))
+      
       const { login: loginReloaded } = await import('../icp')
 
       const principal = await loginReloaded()
 
       expect(principal).toBeNull()
-
-      process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
+      
+      vi.doUnmock('@/config/env')
     })
   })
 
   describe('logout', () => {
     it('should logout successfully', async () => {
+      // Set up Internet Identity URL for this test
+      const originalEnv = process.env.VITE_INTERNET_IDENTITY_URL
+      process.env.VITE_INTERNET_IDENTITY_URL = 'http://localhost:4943?canisterId=rdmx6-jaaaa-aaaaa-aaaq-cai'
+
+      await vi.resetModules()
+      vi.mocked(AuthClient.create).mockClear()
+      
       const mockAuthClient = {
-        logout: vi.fn(),
+        isAuthenticated: vi.fn().mockResolvedValue(true),
+        logout: vi.fn().mockResolvedValue(undefined),
       }
 
       vi.mocked(AuthClient.create).mockResolvedValue(mockAuthClient as any)
-      await createAuthClient()
 
-      await logout()
+      const { createAuthClient: createAuthClientReloaded, logout: logoutReloaded } = await import('../icp')
+      
+      // Initialize authClient first
+      await createAuthClientReloaded()
+
+      await logoutReloaded()
 
       expect(mockAuthClient.logout).toHaveBeenCalled()
+
+      if (originalEnv !== undefined) {
+        process.env.VITE_INTERNET_IDENTITY_URL = originalEnv
+      } else {
+        delete process.env.VITE_INTERNET_IDENTITY_URL
+      }
+      await vi.resetModules()
     })
   })
 })

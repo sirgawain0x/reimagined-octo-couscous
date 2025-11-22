@@ -23,6 +23,10 @@ export const VALIDATION_CLOUD_CONFIG = {
   },
 } as const
 
+export const AFFILIATE_LINKS = {
+  amazon: import.meta.env.VITE_AMAZON_AFFILIATE_LINK || "https://amzn.to/4piZuMy",
+} as const
+
 export const isLocalNetwork = ICP_CONFIG.network === "local"
 export const host = isLocalNetwork ? "http://localhost:4943" : "https://ic0.app"
 

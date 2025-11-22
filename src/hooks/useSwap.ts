@@ -104,8 +104,11 @@ export function useSwap() {
     }
   }
 
-  async function getQuote(poolId: string, amountIn: bigint): Promise<SwapQuote | null> {
-    if (!amountIn || amountIn <= 0) {
+  async function getQuote(poolId: string, amountIn: bigint | number): Promise<SwapQuote | null> {
+    // Convert number to BigInt if needed
+    const amountInBigInt = typeof amountIn === 'number' ? BigInt(amountIn) : amountIn
+    
+    if (!amountInBigInt || amountInBigInt <= 0) {
       setQuote(null)
       return null
     }
@@ -117,7 +120,7 @@ export function useSwap() {
       )
       
       const result = await retryWithTimeout(
-        () => canister.getQuote(poolId, amountIn),
+        () => canister.getQuote(poolId, amountInBigInt),
         10000, // 10 second timeout for query
         { maxRetries: 3, initialDelayMs: 1000 }
       )
@@ -135,7 +138,7 @@ export function useSwap() {
         return null
       }
     } catch (error) {
-      logError("Error getting quote", error as Error, { poolId, amountIn: String(amountIn) })
+      logError("Error getting quote", error as Error, { poolId, amountIn: String(amountInBigInt) })
       return null
     }
   }

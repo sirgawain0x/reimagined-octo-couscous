@@ -5,10 +5,11 @@ import { logError, logWarn } from "@/utils/logger"
 import { useICP } from "./useICP"
 import { retry, retryWithTimeout } from "@/utils/retry"
 import { checkRateLimit } from "@/utils/rateLimiter"
+import { AFFILIATE_LINKS } from "@/config/env"
 
 // Fallback stores if canister is not available
 const fallbackStores: Store[] = [
-  { id: 1, name: "Amazon", reward: 5, logo: "https://placehold.co/100x100/1e293b/ffffff?text=AMZN" },
+  { id: 1, name: "Amazon", reward: 5, logo: "https://placehold.co/100x100/1e293b/ffffff?text=AMZN", url: AFFILIATE_LINKS.amazon },
   { id: 2, name: "Walmart", reward: 3.5, logo: "https://placehold.co/100x100/1e293b/ffffff?text=WMT" },
   { id: 3, name: "Nike", reward: 8, logo: "https://placehold.co/100x100/1e293b/ffffff?text=NIKE" },
   { id: 4, name: "eBay", reward: 2, logo: "https://placehold.co/100x100/1e293b/ffffff?text=EBAY" },
@@ -108,6 +109,7 @@ export function useRewards() {
   }
 
   async function trackPurchase(storeId: number, amount: number): Promise<{ success: boolean; reward: number; error?: string }> {
+    // Validate in order: connection, amount, storeId (to match test expectations)
     if (!isConnected || !principal) {
       return { success: false, reward: 0, error: "Must be connected to track purchases" }
     }
