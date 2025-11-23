@@ -1,10 +1,12 @@
 import React from "react"
 import ReactDOM from "react-dom/client"
 import { NextUIProvider } from "@nextui-org/react"
+// Ensure vendor utilities are loaded before dfinity packages
+// This prevents "Cannot access 'no' before initialization" errors
+import "./index.css"
 import App from "./App.tsx"
 import { ErrorBoundary } from "./ErrorBoundary.tsx"
 import { assertEnvironmentValid } from "./utils/env-validation"
-import "./index.css"
 
 // Validate environment variables on startup
 try {

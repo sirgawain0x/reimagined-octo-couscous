@@ -3,31 +3,7 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
-  plugins: [
-    react(),
-    // Plugin to ensure dfinity chunk loads before vendor
-    {
-      name: 'preload-dfinity',
-      generateBundle(options, bundle) {
-        // Find the dfinity chunk
-        const dfinityChunk = Object.keys(bundle).find(key => 
-          key.includes('dfinity') && key.endsWith('.js')
-        )
-        
-        if (dfinityChunk && bundle[dfinityChunk] && bundle[dfinityChunk].type === 'chunk') {
-          // Mark dfinity chunk as a dependency for other chunks
-          // This ensures it loads first
-          const chunk = bundle[dfinityChunk] as any
-          if (!chunk.viteMetadata) {
-            chunk.viteMetadata = {}
-          }
-          if (!chunk.viteMetadata.importedCss) {
-            chunk.viteMetadata.importedCss = []
-          }
-        }
-      },
-    },
-  ],
+  plugins: [react()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -56,11 +32,14 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
+        // Ensure proper chunk loading order
+        // Vendor must load before dfinity to avoid initialization errors
+        chunkFileNames: 'assets/[name]-[hash].js',
         manualChunks(id) {
           // Vendor chunks - split large dependencies
           if (id.includes('node_modules')) {
-            // CRITICAL: @dfinity packages must be in their own chunk and load first
-            // They have circular dependencies and initialization order requirements
+            // CRITICAL: Load vendor BEFORE dfinity
+            // @dfinity packages depend on vendor utilities, so vendor must initialize first
             if (id.includes('@dfinity/')) {
               return 'dfinity'
             }
@@ -80,7 +59,8 @@ export default defineConfig({
             if (id.includes('lucide-react')) {
               return 'icons'
             }
-            // Everything else from node_modules
+            // Everything else from node_modules goes to vendor
+            // This must load before dfinity chunk
             return 'vendor'
           }
           
