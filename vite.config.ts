@@ -11,6 +11,12 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ['ic-siwb-identity'],
+    include: [
+      '@dfinity/agent',
+      '@dfinity/auth-client',
+      '@dfinity/candid',
+      '@dfinity/principal',
+    ],
   },
   ssr: {
     noExternal: ['ic-use-siwb-identity'],
@@ -20,14 +26,28 @@ export default defineConfig({
     host: true,
   },
   build: {
+    commonjsOptions: {
+      include: [/node_modules/],
+      transformMixedEsModules: true,
+    },
     rollupOptions: {
       output: {
         manualChunks(id) {
           // Vendor chunks - split large dependencies
           if (id.includes('node_modules')) {
-            // Dfinity packages
-            if (id.includes('@dfinity/')) {
-              return 'dfinity'
+            // Split @dfinity packages to avoid circular dependency issues
+            // Keep them separate to ensure proper initialization order
+            if (id.includes('@dfinity/principal')) {
+              return 'dfinity-principal'
+            }
+            if (id.includes('@dfinity/candid')) {
+              return 'dfinity-candid'
+            }
+            if (id.includes('@dfinity/agent')) {
+              return 'dfinity-agent'
+            }
+            if (id.includes('@dfinity/auth-client')) {
+              return 'dfinity-auth'
             }
             // NextUI
             if (id.includes('@nextui-org')) {
