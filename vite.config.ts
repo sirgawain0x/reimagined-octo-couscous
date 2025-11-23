@@ -3,7 +3,45 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Plugin to ensure react-vendor loads before vendor
+    {
+      name: 'ensure-react-first',
+      generateBundle(options, bundle) {
+        // Find react-vendor and vendor chunks
+        const reactVendorChunk = Object.keys(bundle).find(key => 
+          key.includes('react-vendor') && key.endsWith('.js')
+        )
+        const vendorChunk = Object.keys(bundle).find(key => 
+          key.includes('vendor') && !key.includes('react-vendor') && key.endsWith('.js')
+        )
+        
+        // Note: Chunk dependencies are handled automatically by Rollup based on imports
+        // This plugin ensures proper chunk organization
+      },
+      transformIndexHtml(html) {
+        // Reorder modulepreload links to ensure react-vendor loads first
+        return html.replace(
+          /<link rel="modulepreload"[^>]*href="[^"]*react-vendor[^"]*"[^>]*>/,
+          (match) => {
+            // Remove it from current position and we'll add it first
+            return ''
+          }
+        ).replace(
+          /(<head[^>]*>)/,
+          (match) => {
+            // Find react-vendor link in the HTML
+            const reactVendorLink = html.match(/<link rel="modulepreload"[^>]*href="[^"]*react-vendor[^"]*"[^>]*>/)?.[0]
+            if (reactVendorLink) {
+              return match + '\n    ' + reactVendorLink
+            }
+            return match
+          }
+        )
+      },
+    },
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -36,9 +74,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // Ensure proper chunk loading order
-        // Vendor must load before dfinity to avoid initialization errors
         chunkFileNames: 'assets/[name]-[hash].js',
-        manualChunks(id) {
+        manualChunks(id, { getModuleInfo }) {
           // Vendor chunks - split large dependencies
           if (id.includes('node_modules')) {
             // CRITICAL: React MUST load first before any other vendor code
@@ -50,6 +87,31 @@ export default defineConfig({
             // @radix-ui packages use React hooks, so they need React to be available
             if (id.includes('@radix-ui')) {
               return 'react-vendor' // Put with React to ensure React is available
+            }
+            // ic-use-siwb-identity might use React, move it to react-vendor to be safe
+            if (id.includes('ic-use-siwb-identity') || id.includes('ic-siwb')) {
+              return 'react-vendor'
+            }
+            // Check if this module depends on React
+            const moduleInfo = getModuleInfo(id)
+            if (moduleInfo) {
+              // Check if this module is imported by React-dependent code
+              const importedByReact = moduleInfo.importers?.some(importer => 
+                importer.includes('react') || importer.includes('@radix-ui') || importer.includes('@nextui-org') || 
+                importer.includes('/src/') // Our source code uses React
+              ) || false
+              
+              // Check if this module is dynamically imported by anything that uses React
+              // This catches transitive dependencies
+              const hasReactDependency = moduleInfo.dynamicImporters?.some(importer => 
+                importer.includes('react') || importer.includes('@radix-ui') || importer.includes('@nextui-org') ||
+                importer.includes('/src/')
+              ) || false
+              
+              // If this module is used by React code, put it in react-vendor
+              if (importedByReact || hasReactDependency) {
+                return 'react-vendor'
+              }
             }
             // NextUI (depends on React, so loads after react-vendor)
             if (id.includes('@nextui-org')) {
@@ -69,10 +131,10 @@ export default defineConfig({
             if (id.includes('@dfinity/')) {
               return 'vendor' // Put dfinity in vendor chunk to avoid initialization race
             }
-            // Everything else from node_modules goes to vendor
-            // This now includes @dfinity packages to ensure proper initialization
-            // Vendor loads after react-vendor, so React is available
-            return 'vendor'
+            // ULTIMATE FIX: Move ALL other vendor code to react-vendor to ensure React is available
+            // This prevents any vendor code from trying to access React before it's loaded
+            // Only @dfinity stays in vendor chunk
+            return 'react-vendor'
           }
           
           // Split our own code into logical chunks

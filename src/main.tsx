@@ -1,8 +1,8 @@
+// CRITICAL: Import React first to ensure it's available before any vendor code
 import React from "react"
 import ReactDOM from "react-dom/client"
+// Ensure React is fully initialized before loading other dependencies
 import { NextUIProvider } from "@nextui-org/react"
-// Ensure vendor utilities are loaded before dfinity packages
-// This prevents "Cannot access 'no' before initialization" errors
 import "./index.css"
 import App from "./App.tsx"
 import { ErrorBoundary } from "./ErrorBoundary.tsx"
