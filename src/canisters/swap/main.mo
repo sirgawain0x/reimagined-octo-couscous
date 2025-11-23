@@ -37,7 +37,7 @@ persistent actor SwapCanister {
   
   // Network configuration (should be set from environment or canister argument)
   // Set to true for testnet deployment, false for mainnet
-  private let USE_TESTNET : Bool = true; // Set to true for testnet deployment
+  private let USE_TESTNET : Bool = false; // Set to true for testnet deployment
   
   // ckBTC canister ID strings (deferred to avoid initialization errors on local network)
   // We'll parse these lazily when needed to avoid errors during canister installation

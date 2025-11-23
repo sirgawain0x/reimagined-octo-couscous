@@ -1,0 +1,17 @@
+{
+  "lending_canister": {
+    "ic": "xykof-wiaaa-aaaaf-qcvvq-cai"
+  },
+  "portfolio_canister": {
+    "ic": "xdpsa-mqaaa-aaaaf-qcvxa-cai"
+  },
+  "rewards_canister": {
+    "ic": "x7lir-3qaaa-aaaaf-qcvva-cai"
+  },
+  "swap_canister": {
+    "ic": "xeouu-biaaa-aaaaf-qcvxq-cai"
+  },
+  "shopping_rewards_frontend": {
+    "ic": "TO_BE_RETRIEVED"
+  }
+}

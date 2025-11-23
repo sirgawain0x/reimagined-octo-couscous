@@ -59,8 +59,8 @@ persistent actor RewardsCanister {
   private transient var admins : HashMap.HashMap<Principal, Bool> = HashMap.HashMap(0, Principal.equal, Principal.hash);
 
   // Bitcoin API integration
-  private transient let BTC_API_ENABLED : Bool = true; // Enable for testnet
-  private let BTC_NETWORK : BitcoinApi.Network = #Testnet;
+  private transient let BTC_API_ENABLED : Bool = false; // Enable for testnet
+  private let BTC_NETWORK : BitcoinApi.Network = #Mainnet;
 
   // Rate limiting (transient - resets on upgrade)
   private transient var rateLimiter = RateLimiter.RateLimiter(RateLimiter.REWARDS_CONFIG);
@@ -762,12 +762,16 @@ persistent actor RewardsCanister {
                     let txSize = txBytesArray.size();
                     // Calculate locktime start position (last 4 bytes are locktime)
                     // We know txSize >= 4 because we always add locktime (4 bytes)
-                    let locktimeStart = if (txSize > 4) {
-                      txSize - 4
-                    } else if (txSize == 4) {
-                      0
-                    } else {
+                    if (txSize < 4) {
                       return #err("Transaction too small")
+                    };
+                    // Safe subtraction: we know txSize >= 4 from the check above
+                    let locktimeStart = if (txSize > 4) {
+                      // txSize is at least 5, so txSize - 4 is safe
+                      txSize - 4 : Nat
+                    } else {
+                      // txSize == 4, so locktime starts at 0
+                      0
                     };
                     
                     // Copy everything except locktime
