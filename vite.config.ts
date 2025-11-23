@@ -113,13 +113,14 @@ export default defineConfig({
                 return 'react-vendor'
               }
             }
-            // NextUI (depends on React, so loads after react-vendor)
+            // NextUI and Framer Motion MUST be in react-vendor chunk
+            // They directly depend on React and need React to be available immediately
             if (id.includes('@nextui-org')) {
-              return 'nextui'
+              return 'react-vendor'
             }
-            // Framer Motion (used by NextUI)
+            // Framer Motion (used by NextUI, also depends on React)
             if (id.includes('framer-motion')) {
-              return 'nextui'
+              return 'react-vendor'
             }
             // Other large vendor libraries
             if (id.includes('lucide-react')) {
