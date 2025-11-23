@@ -8,10 +8,13 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+    dedupe: ['react', 'react-dom'],
   },
   optimizeDeps: {
     exclude: ['ic-siwb-identity'],
     include: [
+      'react',
+      'react-dom',
       '@dfinity/agent',
       '@dfinity/auth-client',
       '@dfinity/candid',
@@ -38,19 +41,20 @@ export default defineConfig({
         manualChunks(id) {
           // Vendor chunks - split large dependencies
           if (id.includes('node_modules')) {
+            // CRITICAL: React MUST load first before any other vendor code
+            // React core libraries go to react-vendor chunk
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react/jsx-runtime')) {
+              return 'react-vendor'
+            }
             // CRITICAL FIX: Combine @dfinity with vendor to avoid initialization order issues
             // The dfinity packages call into vendor utilities that need to be initialized first
             // By keeping them together, we ensure proper initialization order
             if (id.includes('@dfinity/')) {
               return 'vendor' // Put dfinity in vendor chunk to avoid initialization race
             }
-            // NextUI
+            // NextUI (depends on React, so loads after react-vendor)
             if (id.includes('@nextui-org')) {
               return 'nextui'
-            }
-            // React core
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react/jsx-runtime')) {
-              return 'react-vendor'
             }
             // Framer Motion (used by NextUI)
             if (id.includes('framer-motion')) {
@@ -62,6 +66,7 @@ export default defineConfig({
             }
             // Everything else from node_modules goes to vendor
             // This now includes @dfinity packages to ensure proper initialization
+            // Vendor depends on react-vendor, so React loads first
             return 'vendor'
           }
           
