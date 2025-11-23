@@ -38,10 +38,11 @@ export default defineConfig({
         manualChunks(id) {
           // Vendor chunks - split large dependencies
           if (id.includes('node_modules')) {
-            // CRITICAL: Load vendor BEFORE dfinity
-            // @dfinity packages depend on vendor utilities, so vendor must initialize first
+            // CRITICAL FIX: Combine @dfinity with vendor to avoid initialization order issues
+            // The dfinity packages call into vendor utilities that need to be initialized first
+            // By keeping them together, we ensure proper initialization order
             if (id.includes('@dfinity/')) {
-              return 'dfinity'
+              return 'vendor' // Put dfinity in vendor chunk to avoid initialization race
             }
             // NextUI
             if (id.includes('@nextui-org')) {
@@ -60,7 +61,7 @@ export default defineConfig({
               return 'icons'
             }
             // Everything else from node_modules goes to vendor
-            // This must load before dfinity chunk
+            // This now includes @dfinity packages to ensure proper initialization
             return 'vendor'
           }
           
