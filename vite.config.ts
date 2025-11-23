@@ -46,11 +46,10 @@ export default defineConfig({
             if (id.includes('react') || id.includes('react-dom') || id.includes('react/jsx-runtime')) {
               return 'react-vendor'
             }
-            // CRITICAL FIX: Combine @dfinity with vendor to avoid initialization order issues
-            // The dfinity packages call into vendor utilities that need to be initialized first
-            // By keeping them together, we ensure proper initialization order
-            if (id.includes('@dfinity/')) {
-              return 'vendor' // Put dfinity in vendor chunk to avoid initialization race
+            // React-dependent UI libraries must load after React
+            // @radix-ui packages use React hooks, so they need React to be available
+            if (id.includes('@radix-ui')) {
+              return 'react-vendor' // Put with React to ensure React is available
             }
             // NextUI (depends on React, so loads after react-vendor)
             if (id.includes('@nextui-org')) {
@@ -64,9 +63,15 @@ export default defineConfig({
             if (id.includes('lucide-react')) {
               return 'icons'
             }
+            // CRITICAL FIX: Combine @dfinity with vendor to avoid initialization order issues
+            // The dfinity packages call into vendor utilities that need to be initialized first
+            // By keeping them together, we ensure proper initialization order
+            if (id.includes('@dfinity/')) {
+              return 'vendor' // Put dfinity in vendor chunk to avoid initialization race
+            }
             // Everything else from node_modules goes to vendor
             // This now includes @dfinity packages to ensure proper initialization
-            // Vendor depends on react-vendor, so React loads first
+            // Vendor loads after react-vendor, so React is available
             return 'vendor'
           }
           
