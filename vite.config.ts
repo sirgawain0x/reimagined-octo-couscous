@@ -35,19 +35,10 @@ export default defineConfig({
         manualChunks(id) {
           // Vendor chunks - split large dependencies
           if (id.includes('node_modules')) {
-            // Split @dfinity packages to avoid circular dependency issues
-            // Keep them separate to ensure proper initialization order
-            if (id.includes('@dfinity/principal')) {
-              return 'dfinity-principal'
-            }
-            if (id.includes('@dfinity/candid')) {
-              return 'dfinity-candid'
-            }
-            if (id.includes('@dfinity/agent')) {
-              return 'dfinity-agent'
-            }
-            if (id.includes('@dfinity/auth-client')) {
-              return 'dfinity-auth'
+            // Keep all @dfinity packages together to avoid initialization order issues
+            // They have internal dependencies and need to load as a unit
+            if (id.includes('@dfinity/')) {
+              return 'dfinity'
             }
             // NextUI
             if (id.includes('@nextui-org')) {
