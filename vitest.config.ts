@@ -6,6 +6,11 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/e2e/**', // Exclude E2E tests (they require Playwright)
+    ],
     env: {
       VITE_CANISTER_ID_REWARDS: process.env.VITE_CANISTER_ID_REWARDS || 'rrkah-fqaaa-aaaaa-aaaaq-cai',
       VITE_CANISTER_ID_PORTFOLIO: process.env.VITE_CANISTER_ID_PORTFOLIO || 'rrkah-fqaaa-aaaaa-aaaaq-cai',

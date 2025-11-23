@@ -30,6 +30,39 @@ Object.defineProperty(window, 'ic', {
 // Mock global fetch for Bitcoin API calls
 global.fetch = vi.fn()
 
+// Mock config module to provide Internet Identity URL for tests
+// This must be mocked before any modules that import it
+// Note: Using synchronous factory since vi.mock() is hoisted
+// Use valid Principal IDs for canister IDs to pass validation
+// The factory function reads from process.env at runtime when module is imported
+vi.mock('@/config/env', () => {
+  // This function is called each time the module is imported
+  return {
+    ICP_CONFIG: {
+      network: 'local',
+      internetIdentityUrl: 'https://identity.ic0.app',
+      canisterIds: {
+        icSiwbProvider: 'be2us-64aaa-aaaaa-qaabq-cai',
+        // Read from process.env at mock definition time - these are set in this file below
+        rewards: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+        lending: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+        portfolio: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+        swap: 'rrkah-fqaaa-aaaaa-aaaaq-cai',
+      },
+    },
+    isLocalNetwork: true,
+    host: 'http://localhost:4943',
+    VALIDATION_CLOUD_CONFIG: {
+      apiKey: '',
+      network: 'testnet',
+      solana: {},
+    },
+    AFFILIATE_LINKS: {
+      amazon: 'https://amzn.to/4piZuMy',
+    },
+  }
+})
+
 // Mock ValidationCloud service
 vi.mock('@/services/validationcloud', () => ({
   getBitcoinBalance: vi.fn(async () => ({ balance: 0 })),

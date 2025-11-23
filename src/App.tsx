@@ -1,4 +1,5 @@
 import { useState, Suspense, lazy } from "react"
+import type { Principal } from "@dfinity/principal"
 import { useICP } from "@/hooks/useICP"
 import Header from "@/components/Header"
 import Footer from "@/components/Footer"

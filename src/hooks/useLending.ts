@@ -203,18 +203,26 @@ export function useLending() {
   }
 
   async function deposit(asset: string, amount: number): Promise<boolean> {
+    setError(null)
+    
     if (!isConnected || !principal) {
-      logError("Deposit attempted without authentication", new Error("User not authenticated"))
+      const errorMsg = "User not authenticated"
+      setError(errorMsg)
+      logError("Deposit attempted without authentication", new Error(errorMsg))
       return false
     }
 
     if (amount <= 0) {
-      logError("Invalid deposit amount", new Error(`Amount must be greater than 0, got ${amount}`))
+      const errorMsg = `Amount must be greater than 0, got ${amount}`
+      setError(errorMsg)
+      logError("Invalid deposit amount", new Error(errorMsg))
       return false
     }
 
     if (!["BTC", "ETH", "SOL"].includes(asset.toUpperCase())) {
-      logError("Invalid asset", new Error(`Asset must be BTC, ETH, or SOL, got ${asset}`))
+      const errorMsg = `Asset must be BTC, ETH, or SOL, got ${asset}`
+      setError(errorMsg)
+      logError("Invalid asset", new Error(errorMsg))
       return false
     }
 
@@ -229,7 +237,11 @@ export function useLending() {
       )
       
       // Convert amount to nat64 (multiply by 1e8 for satoshi-like precision)
-      const amountNat64 = BigInt(Math.floor(amount * 1e8))
+      // For BTC, the test expects 1000 * 1e8, but the function receives amount in BTC (1000)
+      // So we convert BTC to satoshis: amount * 1e8
+      const amountNat64 = asset.toLowerCase() === 'btc' 
+        ? BigInt(Math.floor(amount * 1e8))
+        : BigInt(Math.floor(amount * 1e8))
       
       const result = await retryWithTimeout(
         () => canister.deposit(asset.toLowerCase(), amountNat64),
@@ -238,33 +250,46 @@ export function useLending() {
       )
       
       if ("ok" in result) {
+        setError(null)
         await loadData() // Refresh data
         return true
       } else if ("err" in result) {
-        logError("Canister returned error", new Error(result.err), { asset, amount })
+        const errorMsg = result.err
+        setError(errorMsg)
+        logError("Canister returned error", new Error(errorMsg), { asset, amount })
         return false
       }
       
       return false
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      setError(errorMsg)
       logError("Error depositing", error as Error, { asset, amount })
       return false
     }
   }
 
   async function withdraw(asset: string, amount: number, recipientAddress?: string): Promise<boolean> {
+    setError(null)
+    
     if (!isConnected || !principal) {
-      logError("Withdrawal attempted without authentication", new Error("User not authenticated"))
+      const errorMsg = "User not authenticated"
+      setError(errorMsg)
+      logError("Withdrawal attempted without authentication", new Error(errorMsg))
       return false
     }
 
     if (amount <= 0) {
-      logError("Invalid withdrawal amount", new Error(`Amount must be greater than 0, got ${amount}`))
+      const errorMsg = `Amount must be greater than 0, got ${amount}`
+      setError(errorMsg)
+      logError("Invalid withdrawal amount", new Error(errorMsg))
       return false
     }
 
     if (!["BTC", "ETH", "SOL"].includes(asset.toUpperCase())) {
-      logError("Invalid asset", new Error(`Asset must be BTC, ETH, or SOL, got ${asset}`))
+      const errorMsg = `Asset must be BTC, ETH, or SOL, got ${asset}`
+      setError(errorMsg)
+      logError("Invalid asset", new Error(errorMsg))
       return false
     }
 
@@ -285,7 +310,9 @@ export function useLending() {
       const address = recipientAddress || (asset.toUpperCase() === "BTC" ? "" : "mock_address")
       
       if (asset.toUpperCase() === "BTC" && !recipientAddress) {
-        logError("Bitcoin withdrawal requires recipient address", new Error("No recipient address provided"))
+        const errorMsg = "No recipient address provided"
+        setError(errorMsg)
+        logError("Bitcoin withdrawal requires recipient address", new Error(errorMsg))
         return false
       }
       
@@ -296,15 +323,20 @@ export function useLending() {
       )
       
       if ("ok" in result) {
+        setError(null)
         await loadData() // Refresh data
         return true
       } else if ("err" in result) {
-        logError("Canister returned error", new Error(result.err), { asset, amount })
+        const errorMsg = result.err
+        setError(errorMsg)
+        logError("Canister returned error", new Error(errorMsg), { asset, amount })
         return false
       }
       
       return false
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      setError(errorMsg)
       logError("Error withdrawing", error as Error, { asset, amount })
       return false
     }
@@ -316,28 +348,40 @@ export function useLending() {
     collateralAsset: string,
     collateralAmount: number
   ): Promise<boolean> {
+    setError(null)
+    
     if (!isConnected || !principal) {
-      logError("Borrow attempted without authentication", new Error("User not authenticated"))
+      const errorMsg = "User not authenticated"
+      setError(errorMsg)
+      logError("Borrow attempted without authentication", new Error(errorMsg))
       return false
     }
 
     if (amount <= 0) {
-      logError("Invalid borrow amount", new Error(`Amount must be greater than 0, got ${amount}`))
+      const errorMsg = `Amount must be greater than 0, got ${amount}`
+      setError(errorMsg)
+      logError("Invalid borrow amount", new Error(errorMsg))
       return false
     }
 
     if (collateralAmount <= 0) {
-      logError("Invalid collateral amount", new Error(`Collateral amount must be greater than 0, got ${collateralAmount}`))
+      const errorMsg = `Collateral amount must be greater than 0, got ${collateralAmount}`
+      setError(errorMsg)
+      logError("Invalid collateral amount", new Error(errorMsg))
       return false
     }
 
     if (!["BTC", "ETH", "SOL"].includes(asset.toUpperCase())) {
-      logError("Invalid asset", new Error(`Asset must be BTC, ETH, or SOL, got ${asset}`))
+      const errorMsg = `Asset must be BTC, ETH, or SOL, got ${asset}`
+      setError(errorMsg)
+      logError("Invalid asset", new Error(errorMsg))
       return false
     }
 
     if (!["BTC", "ETH", "SOL"].includes(collateralAsset.toUpperCase())) {
-      logError("Invalid collateral asset", new Error(`Collateral asset must be BTC, ETH, or SOL, got ${collateralAsset}`))
+      const errorMsg = `Collateral asset must be BTC, ETH, or SOL, got ${collateralAsset}`
+      setError(errorMsg)
+      logError("Invalid collateral asset", new Error(errorMsg))
       return false
     }
 
@@ -362,28 +406,39 @@ export function useLending() {
       )
       
       if ("ok" in result) {
+        setError(null)
         await loadData() // Refresh data
         return true
       } else if ("err" in result) {
-        logError("Canister returned error", new Error(result.err), { asset, amount, collateralAsset, collateralAmount })
+        const errorMsg = result.err
+        setError(errorMsg)
+        logError("Canister returned error", new Error(errorMsg), { asset, amount, collateralAsset, collateralAmount })
         return false
       }
       
       return false
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      setError(errorMsg)
       logError("Error borrowing", error as Error, { asset, amount, collateralAsset, collateralAmount })
       return false
     }
   }
 
   async function repay(borrowId: bigint, amount: number): Promise<boolean> {
+    setError(null)
+    
     if (!isConnected || !principal) {
-      logError("Repay attempted without authentication", new Error("User not authenticated"))
+      const errorMsg = "User not authenticated"
+      setError(errorMsg)
+      logError("Repay attempted without authentication", new Error(errorMsg))
       return false
     }
 
     if (amount <= 0) {
-      logError("Invalid repay amount", new Error(`Amount must be greater than 0, got ${amount}`))
+      const errorMsg = `Amount must be greater than 0, got ${amount}`
+      setError(errorMsg)
+      logError("Invalid repay amount", new Error(errorMsg))
       return false
     }
 
@@ -407,15 +462,20 @@ export function useLending() {
       )
       
       if ("ok" in result) {
+        setError(null)
         await loadData() // Refresh data
         return true
       } else if ("err" in result) {
-        logError("Canister returned error", new Error(result.err), { borrowId, amount })
+        const errorMsg = result.err
+        setError(errorMsg)
+        logError("Canister returned error", new Error(errorMsg), { borrowId, amount })
         return false
       }
       
       return false
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      setError(errorMsg)
       logError("Error repaying", error as Error, { borrowId, amount })
       return false
     }
@@ -432,6 +492,7 @@ export function useLending() {
     withdraw,
     borrow,
     repay,
+    refresh: loadData,
     refetch: loadData,
   }
 }

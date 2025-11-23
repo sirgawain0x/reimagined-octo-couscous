@@ -23,17 +23,17 @@ module Runestone {
   private let TAG_FLAGS : Nat = 2; // Etching flags
   private let TAG_RUNE : Nat = 4; // Rune name (base-26 encoded)
   private let TAG_PREMINE : Nat = 6; // Premine amount
-  private let TAG_CAP : Nat = 8; // Mint cap
-  private let TAG_AMOUNT : Nat = 10; // Mint amount
-  private let TAG_OFFSET_END : Nat = 10; // Mint offset end
-  private let TAG_OFFSET_START : Nat = 12; // Mint offset start
-  private let TAG_HEIGHT_END : Nat = 14; // Mint height end
-  private let TAG_HEIGHT_START : Nat = 16; // Mint height start
+  private let _TAG_CAP : Nat = 8; // Mint cap (reserved for future use)
+  private let _TAG_AMOUNT : Nat = 10; // Mint amount (reserved for future use)
+  private let _TAG_OFFSET_END : Nat = 10; // Mint offset end (reserved for future use)
+  private let _TAG_OFFSET_START : Nat = 12; // Mint offset start (reserved for future use)
+  private let _TAG_HEIGHT_END : Nat = 14; // Mint height end (reserved for future use)
+  private let _TAG_HEIGHT_START : Nat = 16; // Mint height start (reserved for future use)
   private let TAG_DIVISIBILITY : Nat = 1; // Decimal places
 
   // Flag bits
-  private let FLAG_ETCHING : Nat = 0; // Indicates this is an etching
-  private let FLAG_TERMS : Nat = 1; // Indicates mint terms are present
+  private let _FLAG_ETCHING : Nat = 0; // Indicates this is an etching (reserved for future use)
+  private let _FLAG_TERMS : Nat = 1; // Indicates mint terms are present (reserved for future use)
 
   // Maximum values
   private let MAX_RUNE_NAME_LENGTH : Nat = 28;
@@ -320,7 +320,7 @@ module Runestone {
       case (#ok(nameValue)) {
         var buffer = Buffer.Buffer<Nat8>(MAX_OP_RETURN_SIZE);
         
-        // Tag 2: Flags (set FLAG_ETCHING bit)
+        // Tag 2: Flags (set etching bit)
         // In Motoko, use multiplication for bit shifts: 1 << 0 = 1 * (2^0) = 1
         let flagsValue = 1; // Bit 0 = etching (1 << 0 = 1)
         let flagsResult = encodeTagValue(TAG_FLAGS, flagsValue);

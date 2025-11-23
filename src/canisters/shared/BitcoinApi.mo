@@ -2,7 +2,6 @@
 // Integrates with ICP Bitcoin API via management canister
 // Supports regtest, testnet, and mainnet networks
 
-import ExperimentalCycles "mo:base/ExperimentalCycles";
 import Result "mo:base/Result";
 import Text "mo:base/Text";
 import Nat32 "mo:base/Nat32";
@@ -99,15 +98,14 @@ module BitcoinApi {
     address : BitcoinAddress,
     min_confirmations : ?Nat32
   ) : async Result.Result<Satoshi, Text> {
-    ExperimentalCycles.add<system>(GET_BALANCE_COST_CYCLES);
     try {
-      let balance = await management_canister_actor.bitcoin_get_balance({
+      let balance = await (with cycles = GET_BALANCE_COST_CYCLES) management_canister_actor.bitcoin_get_balance({
         address;
         network;
         min_confirmations;
       });
       #ok(balance)
-    } catch (e) {
+    } catch (_) {
       #err("Failed to get balance")
     }
   };
@@ -121,15 +119,14 @@ module BitcoinApi {
     address : BitcoinAddress,
     filter : ?UtxosFilter
   ) : async Result.Result<GetUtxosResponse, Text> {
-    ExperimentalCycles.add<system>(GET_UTXOS_COST_CYCLES);
     try {
-      let response = await management_canister_actor.bitcoin_get_utxos({
+      let response = await (with cycles = GET_UTXOS_COST_CYCLES) management_canister_actor.bitcoin_get_utxos({
         address;
         network;
         filter;
       });
       #ok(response)
-    } catch (e) {
+    } catch (_) {
       #err("Failed to get UTXOs")
     }
   };
@@ -142,13 +139,12 @@ module BitcoinApi {
   public func get_current_fee_percentiles(
     network : Network
   ) : async Result.Result<[MillisatoshiPerVByte], Text> {
-    ExperimentalCycles.add<system>(GET_CURRENT_FEE_PERCENTILES_COST_CYCLES);
     try {
-      let percentiles = await management_canister_actor.bitcoin_get_current_fee_percentiles({
+      let percentiles = await (with cycles = GET_CURRENT_FEE_PERCENTILES_COST_CYCLES) management_canister_actor.bitcoin_get_current_fee_percentiles({
         network;
       });
       #ok(percentiles)
-    } catch (e) {
+    } catch (_) {
       #err("Failed to get fee percentiles")
     }
   };
@@ -163,14 +159,13 @@ module BitcoinApi {
   ) : async Result.Result<(), Text> {
     let transaction_fee = SEND_TRANSACTION_BASE_COST_CYCLES + transaction.size() * SEND_TRANSACTION_COST_CYCLES_PER_BYTE;
     
-    ExperimentalCycles.add<system>(transaction_fee);
     try {
-      await management_canister_actor.bitcoin_send_transaction({
+      await (with cycles = transaction_fee) management_canister_actor.bitcoin_send_transaction({
         network;
         transaction;
       });
       #ok(())
-    } catch (e) {
+    } catch (_) {
       #err("Failed to send transaction")
     }
   };

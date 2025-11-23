@@ -164,6 +164,7 @@ export async function createPortfolioActor(): Promise<PortfolioCanister> {
         totalValue: IDL.Float64,
         totalRewards: IDL.Nat64,
         totalLended: IDL.Float64,
+        totalBorrowed: IDL.Float64,
         assets: IDL.Vec(IDL.Record({
           name: IDL.Text,
           symbol: IDL.Text,
@@ -287,9 +288,9 @@ export async function createSwapActor(allowAnonymous = true): Promise<SwapCanist
  * Check if user is authenticated before creating actors
  */
 export async function requireAuth(): Promise<Principal> {
-  const identity = await getIdentity()
-  if (!identity) {
+  const principal = await getIdentity()
+  if (!principal) {
     throw new Error("User must be authenticated to perform this action")
   }
-  return identity
+  return principal
 }
