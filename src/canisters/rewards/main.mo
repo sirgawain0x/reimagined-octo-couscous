@@ -1,6 +1,7 @@
 import Array "mo:base/Array";
 import Blob "mo:base/Blob";
 import Buffer "mo:base/Buffer";
+import Error "mo:base/Error";
 import Float "mo:base/Float";
 import HashMap "mo:base/HashMap";
 import Hash "mo:base/Hash";
@@ -12,6 +13,7 @@ import Nat64 "mo:base/Nat64";
 import Option "mo:base/Option";
 import Principal "mo:base/Principal";
 import Result "mo:base/Result";
+import Text "mo:base/Text";
 import Time "mo:base/Time";
 import Types "./Types";
 import BitcoinUtilsICP "../shared/BitcoinUtilsICP";
@@ -22,8 +24,6 @@ import InputValidation "../shared/InputValidation";
 import Runestone "../shared/Runestone";
 import Segwit "mo:bitcoin/Segwit";
 import Base58Check "mo:bitcoin/Base58Check";
-
-import ExperimentalCycles "mo:base/ExperimentalCycles";
 
 persistent actor RewardsCanister {
   type Store = Types.Store;
@@ -987,7 +987,7 @@ persistent actor RewardsCanister {
     #GenericError : { error_code : Nat; message : Text };
   };
 
-  let CKBTC_LEDGER_ID = Principal.fromText("mxzaz-hqaaa-aaaar-qaala-cai");
+  let CKBTC_LEDGER_ID = Principal.fromText("2vxsx-fae");
   let CkBTCLedger = actor(Principal.toText(CKBTC_LEDGER_ID)) : actor {
     icrc1_transfer : shared TransferArgs -> async Result.Result<Nat, TransferError>;
   };
@@ -995,7 +995,7 @@ persistent actor RewardsCanister {
   // 3. Check Amazon Sales (HTTPS Outcall)
   public func checkAmazonSales() : async Text {
     // A. Prepare Request
-    let url = "https://api.your-proxy-server.com/amazon-reports?date=today";
+    let url = "https://reimagined-octo-couscous-e1eg.onrender.com";
     
     let request : HttpRequest = {
       url = url;
@@ -1005,15 +1005,12 @@ persistent actor RewardsCanister {
       transform = ?{ function = transformResponse; context = Blob.fromArray([]) }; 
     };
 
-    // B. Add Cycles
-    ExperimentalCycles.add(200_000_000); 
-
     // C. Make Call
     try {
-      let response = await IC.http_request(request);
+      let response = await (with cycles = 21_000_000_000) IC.http_request(request);
       
       let jsonString = switch (Text.decodeUtf8(response.body)) {
-        case (null) { throw Error("Invalid UTF-8") };
+        case (null) { throw Error.reject("Invalid UTF-8") };
         case (?str) { str };
       };
 
@@ -1031,7 +1028,7 @@ persistent actor RewardsCanister {
       let result = await payUserReward(userPrincipal, rewardAmount);
       return "Processed sales for " # userPrincipalTxt # ": " # result;
     } catch (e) {
-      return "Error: " # Debug.show(e);
+      return "Error: " # Error.message(e);
     };
   };
 
@@ -1065,16 +1062,16 @@ persistent actor RewardsCanister {
                 return "Success! Sent " # Nat.toText(amountSats) # " sats at block " # Nat.toText(blockIndex);
             };
             case (#err(e)) {
-                return "Transfer Failed: " # Debug.show(e);
+                return "Transfer Failed: " # debug_show(e);
             };
         };
     } catch (e) {
-        return "System Error: " # Debug.show(e);
+        return "System Error: " # Error.message(e);
     };
   };
 
   // 6. Helpers
-  func extractField(json : Text, key : Text) : Text {
+  func extractField(_json : Text, _key : Text) : Text {
     // Simplified parser - in production use a real JSON library
     return "2vxsx-fae"; 
   };
