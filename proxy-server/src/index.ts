@@ -46,7 +46,7 @@ app.get('/amazon-reports', async (req: Request<{}, {}, {}, AmazonReportRequest>,
       sales: [
         {
           orderId: "114-1234567-1234567",
-          subtag: "2vxsx-fae-123-456", // This matches the format the Motoko canister looks for
+          subtag: "2vxsx-fae", // Using anonymous principal for testing
           commission: 5.00,
           currency: "USD",
           items: [

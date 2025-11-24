@@ -28,7 +28,8 @@ module {
       List.add(buffer, false); // Pad 0's for full byte
     };
     if (hasSign) {
-      let mostSignificantBit : Bool = List.get(buffer, List.size(buffer) - 1 : Nat);
+      let tempArr = List.toArray(buffer);
+      let mostSignificantBit : Bool = if (tempArr.size() > 0) tempArr[tempArr.size() - 1] else false;
       if (mostSignificantBit) {
         // If most significant bit is a 1, overflow to another byte
         for (i in Nat.range(1, byteLength + 1)) {

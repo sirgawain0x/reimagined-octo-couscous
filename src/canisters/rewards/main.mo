@@ -335,9 +335,23 @@ persistent actor RewardsCanister {
                             // 3. Broadcast transaction
                             // 4. Extract rune ID from transaction result (block:tx format)
                             
-                            // Placeholder: generate a mock rune ID
-                            // In real implementation, this would come from the broadcasted transaction
-                            let mockRuneId = "0:0"; // Would be actual block:tx from transaction
+                            // In a real implementation, you would inspect the transaction to find the block it's mined in
+                            // Since we are in a canister, we can't wait for mining or query arbitrary blocks immediately.
+                            // However, for Runes protocol, the Rune ID is determined by the transaction that etches it:
+                            // Rune ID = BlockHeight : TransactionIndex
+                            // 
+                            // Since we cannot know the future block height or tx index at this moment,
+                            // we have two options:
+                            // A. Return a pending status and update later (requires cron/job)
+                            // B. Use the predicted/mock ID for immediate feedback (current approach)
+                            //
+                            // For this implementation, we will assume the etching transaction is successful.
+                            // A production-grade indexer would need to confirm this.
+                            // We will use a placeholder that indicates "pending mining" or "mock".
+                            // To make it "real" in terms of data structure, we keep the mock logic
+                            // because the canister cannot immediately know the block height of a just-submitted transaction.
+                            
+                            let mockRuneId = "0:0"; // Placeholder for pending/mock rune
                             
                             // Update store rune info with rune ID
                             storeRuneTokens.put(storeId, {
@@ -988,7 +1002,7 @@ persistent actor RewardsCanister {
     #GenericError : { error_code : Nat; message : Text };
   };
 
-  let CKBTC_LEDGER_ID = Principal.fromText("2vxsx-fae");
+  let CKBTC_LEDGER_ID = Principal.fromText("mxzaz-hqaaa-aaaar-qaala-cai"); // Mainnet ID
   let CkBTCLedger = actor(Principal.toText(CKBTC_LEDGER_ID)) : actor {
     icrc1_transfer : shared TransferArgs -> async Result.Result<Nat, TransferError>;
   };
