@@ -229,13 +229,51 @@ export async function createSwapActor(allowAnonymous = true): Promise<SwapCanist
         })],
         [],
       ),
-      getCKBTCBalance: IDL.Func([IDL.Principal], [IDL.Nat], ["query"]),
-      getBTCAddress: IDL.Func([IDL.Principal], [IDL.Text], ["query"]),
+      getCKBTCBalance: IDL.Func([IDL.Principal], [IDL.Variant({
+        ok: IDL.Nat,
+        err: IDL.Text,
+      })], []),
+      getBTCAddress: IDL.Func([IDL.Principal], [IDL.Variant({
+        ok: IDL.Text,
+        err: IDL.Text,
+      })], []),
       updateBalance: IDL.Func([], [IDL.Variant({
         ok: IDL.Nat,
         err: IDL.Text,
       })], []),
       withdrawBTC: IDL.Func([IDL.Nat64, IDL.Text], [IDL.Variant({
+        ok: IDL.Nat,
+        err: IDL.Text,
+      })], []),
+      getCanisterCKBTCBalance: IDL.Func([], [IDL.Variant({
+        ok: IDL.Nat,
+        err: IDL.Text,
+      })], []),
+      depositCKBTC: IDL.Func([IDL.Nat64], [IDL.Variant({
+        ok: IDL.Nat,
+        err: IDL.Text,
+      })], []),
+      getCKETHBalance: IDL.Func([IDL.Principal], [IDL.Variant({
+        ok: IDL.Nat,
+        err: IDL.Text,
+      })], []),
+      getETHAddress: IDL.Func([IDL.Principal], [IDL.Variant({
+        ok: IDL.Text,
+        err: IDL.Text,
+      })], []),
+      updateCkETHBalance: IDL.Func([], [IDL.Variant({
+        ok: IDL.Nat,
+        err: IDL.Text,
+      })], []),
+      withdrawETH: IDL.Func([IDL.Nat64, IDL.Text], [IDL.Variant({
+        ok: IDL.Nat,
+        err: IDL.Text,
+      })], []),
+      getCanisterCKETHBalance: IDL.Func([], [IDL.Variant({
+        ok: IDL.Nat,
+        err: IDL.Text,
+      })], []),
+      depositCKETH: IDL.Func([IDL.Nat64], [IDL.Variant({
         ok: IDL.Nat,
         err: IDL.Text,
       })], []),

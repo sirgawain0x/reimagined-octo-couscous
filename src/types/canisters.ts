@@ -29,10 +29,18 @@ export interface PortfolioCanister {
 export interface SwapCanister {
   getQuote: (poolId: string, amountIn: bigint) => Promise<{ ok: SwapQuote; err?: string } | { ok?: SwapQuote; err: string }>
   swap: (poolId: string, tokenIn: ChainKeyToken, amountIn: bigint, minAmountOut: bigint) => Promise<{ ok: SwapResult; err?: string } | { ok?: SwapResult; err: string }>
-  getCKBTCBalance: (userId: Principal) => Promise<bigint>
-  getBTCAddress: (userId: Principal) => Promise<string>
+  getCKBTCBalance: (userId: Principal) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  getBTCAddress: (userId: Principal) => Promise<{ ok: string; err?: string } | { ok?: string; err: string }>
   updateBalance: () => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
   withdrawBTC: (amount: bigint, btcAddress: string) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  getCanisterCKBTCBalance: () => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  depositCKBTC: (amount: bigint) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  getCKETHBalance: (userId: Principal) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  getETHAddress: (userId: Principal) => Promise<{ ok: string; err?: string } | { ok?: string; err: string }>
+  updateCkETHBalance: () => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  withdrawETH: (amount: bigint, ethAddress: string) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  getCanisterCKETHBalance: () => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  depositCKETH: (amount: bigint) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
   getSwapHistory: (userId: Principal) => Promise<SwapRecord[]>
   getPools: () => Promise<Array<{ tokenA: ChainKeyToken; tokenB: ChainKeyToken; reserveA: bigint; reserveB: bigint; kLast: bigint }>>
   getSOLBalance: (solAddress: string) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>

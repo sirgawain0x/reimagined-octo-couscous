@@ -248,6 +248,131 @@ export function useSwap() {
     }
   }
 
+  async function getCKBTCBalance(): Promise<bigint | null> {
+    if (!isConnected || !principal) {
+      return null
+    }
+
+    try {
+      const canister = await retry(
+        () => createSwapActor(true),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      const result = await retryWithTimeout(
+        () => canister.getCKBTCBalance(principal),
+        10000,
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
+      
+      if ("ok" in result && result.ok !== undefined) {
+        return result.ok
+      }
+      return null
+    } catch (error) {
+      logError("Error getting ckBTC balance", error as Error)
+      return null
+    }
+  }
+
+  async function getBTCAddress(): Promise<string | null> {
+    if (!isConnected || !principal) {
+      return null
+    }
+
+    try {
+      const canister = await retry(
+        () => createSwapActor(true),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      const result = await retryWithTimeout(
+        () => canister.getBTCAddress(principal),
+        10000,
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
+      
+      if ("ok" in result && result.ok) {
+        return result.ok
+      }
+      return null
+    } catch (error) {
+      logError("Error getting BTC address", error as Error)
+      return null
+    }
+  }
+
+  async function updateCKBTCBalance(): Promise<{ success: boolean; amount?: bigint }> {
+    if (!isConnected || !principal) {
+      return { success: false }
+    }
+
+    try {
+      checkRateLimit("swap", principal.toText())
+      
+      const canister = await retry(
+        () => createSwapActor(false),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      const result = await retryWithTimeout(
+        () => canister.updateBalance(),
+        30000, // 30 second timeout for update operations
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
+      
+      if ("ok" in result && result.ok !== undefined) {
+        return { success: true, amount: result.ok }
+      } else if ("err" in result && result.err) {
+        logError("Failed to update ckBTC balance", new Error(result.err))
+        return { success: false }
+      }
+      
+      return { success: false }
+    } catch (error) {
+      logError("Error updating ckBTC balance", error as Error)
+      return { success: false }
+    }
+  }
+
+  async function withdrawCKBTC(amount: bigint, btcAddress: string): Promise<{ success: boolean; txIndex?: bigint }> {
+    if (!isConnected || !principal) {
+      return { success: false }
+    }
+
+    if (amount <= 0) {
+      logError("Invalid withdrawal amount", new Error(`Amount must be greater than 0, got ${amount}`))
+      return { success: false }
+    }
+
+    try {
+      checkRateLimit("swap", principal.toText())
+      
+      const canister = await retry(
+        () => createSwapActor(false),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+      
+      const result = await retryWithTimeout(
+        () => canister.withdrawBTC(amount, btcAddress),
+        60000, // 60 second timeout for withdrawal operations
+        { maxRetries: 3, initialDelayMs: 1000 }
+      )
+      
+      if ("ok" in result && result.ok !== undefined) {
+        return { success: true, txIndex: result.ok }
+      } else if ("err" in result && result.err) {
+        logError("Failed to withdraw ckBTC", new Error(result.err), { amount: String(amount), address: btcAddress })
+        return { success: false }
+      }
+      
+      return { success: false }
+    } catch (error) {
+      logError("Error withdrawing ckBTC", error as Error, { amount: String(amount), address: btcAddress })
+      return { success: false }
+    }
+  }
+
   return {
     pools,
     quote,
@@ -255,6 +380,10 @@ export function useSwap() {
     getQuote,
     executeSwap,
     getSwapHistory,
+    getCKBTCBalance,
+    getBTCAddress,
+    updateCKBTCBalance,
+    withdrawCKBTC,
     refresh: loadPools,
   }
 }
