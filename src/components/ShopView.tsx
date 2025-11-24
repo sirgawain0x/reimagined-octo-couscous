@@ -1,17 +1,31 @@
 import { ArrowRight } from "lucide-react"
 import { useRewards } from "@/hooks/useRewards"
+import { useICP } from "@/hooks/useICP"
 import { logInfo } from "@/utils/logger"
 import type { Store } from "@/types"
 
 function ShopView() {
   const { stores, isLoading } = useRewards()
+  const { principal } = useICP()
 
   function handleShopNow(store: Store) {
     logInfo("User initiated shopping", { storeName: store.name, storeId: store.id })
     
     if (store.url) {
+      let finalUrl = store.url
+      
+      // Append ascsubtag if user is authenticated and it's an Amazon link (or generic logic)
+      // The blueprint specifically mentions Amazon but this pattern works for many affiliate programs
+      if (principal) {
+        const separator = finalUrl.includes("?") ? "&" : "?"
+        finalUrl = `${finalUrl}${separator}ascsubtag=${principal.toText()}`
+        logInfo("Appended user principal to affiliate link", { principal: principal.toText() })
+      } else {
+        logInfo("User not authenticated, using generic affiliate link")
+      }
+
       // Open affiliate link in new tab
-      window.open(store.url, "_blank", "noopener,noreferrer")
+      window.open(finalUrl, "_blank", "noopener,noreferrer")
     } else {
       // Fallback: log warning if no URL is available
       logInfo("Store URL not available", { storeName: store.name })

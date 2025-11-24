@@ -23,6 +23,8 @@ import Runestone "../shared/Runestone";
 import Segwit "mo:bitcoin/Segwit";
 import Base58Check "mo:bitcoin/Base58Check";
 
+import ExperimentalCycles "mo:base/ExperimentalCycles";
+
 persistent actor RewardsCanister {
   type Store = Types.Store;
   type StoreId = Types.StoreId;
@@ -938,6 +940,143 @@ persistent actor RewardsCanister {
   /// Check if a principal is an admin
   public query func isAdminPrincipal(principal : Principal) : async Bool {
     isAdmin(principal)
+  };
+
+  // ------------------------------------------------------------------
+  // SHOP-TO-EARN (HTTPS Outcall + ckBTC Rewards)
+  // ------------------------------------------------------------------
+
+  // 1. HTTP Types & Actor
+  public type HttpHeader = { name : Text; value : Text };
+  public type HttpRequest = {
+    url : Text;
+    method : { #get; #post; #head };
+    body : ?Blob;
+    headers : [HttpHeader];
+    transform : ?{ function : shared query (TransformArgs) -> async HttpResponse; context : Blob };
+  };
+  public type HttpResponse = {
+    status : Nat;
+    headers : [HttpHeader];
+    body : Blob;
+  };
+  public type TransformArgs = { response : HttpResponse; context : Blob };
+
+  let IC = actor "aaaaa-aa" : actor {
+    http_request : HttpRequest -> async HttpResponse;
+  };
+
+  // 2. ckBTC Types & Actor (ICRC-1)
+  type Account = { owner : Principal; subaccount : ?[Nat8] };
+  type TransferArgs = {
+    from_subaccount : ?[Nat8];
+    to : Account;
+    amount : Nat;
+    fee : ?Nat;
+    memo : ?[Nat8];
+    created_at_time : ?Nat64;
+  };
+  type TransferError = {
+    #BadFee : { expected_fee : Nat };
+    #BadBurn : { min_burn_amount : Nat };
+    #InsufficientFunds : { balance : Nat };
+    #TooOld;
+    #CreatedInFuture : { ledger_time : Nat64 };
+    #Duplicate : { duplicate_of : Nat };
+    #TemporarilyUnavailable;
+    #GenericError : { error_code : Nat; message : Text };
+  };
+
+  let CKBTC_LEDGER_ID = Principal.fromText("mxzaz-hqaaa-aaaar-qaala-cai");
+  let CkBTCLedger = actor(Principal.toText(CKBTC_LEDGER_ID)) : actor {
+    icrc1_transfer : shared TransferArgs -> async Result.Result<Nat, TransferError>;
+  };
+
+  // 3. Check Amazon Sales (HTTPS Outcall)
+  public func checkAmazonSales() : async Text {
+    // A. Prepare Request
+    let url = "https://api.your-proxy-server.com/amazon-reports?date=today";
+    
+    let request : HttpRequest = {
+      url = url;
+      method = #get;
+      body = null;
+      headers = [ { name = "Accept"; value = "application/json" } ];
+      transform = ?{ function = transformResponse; context = Blob.fromArray([]) }; 
+    };
+
+    // B. Add Cycles
+    ExperimentalCycles.add(200_000_000); 
+
+    // C. Make Call
+    try {
+      let response = await IC.http_request(request);
+      
+      let jsonString = switch (Text.decodeUtf8(response.body)) {
+        case (null) { throw Error("Invalid UTF-8") };
+        case (?str) { str };
+      };
+
+      // D. Parse & Pay
+      let userPrincipalTxt = extractField(jsonString, "subtag");
+      
+      if (userPrincipalTxt == "") {
+        return "No sales found";
+      };
+      
+      // In production, you would handle parsing errors
+      let userPrincipal = Principal.fromText(userPrincipalTxt);
+      let rewardAmount : Nat = 2500; // Mock amount for demo
+
+      let result = await payUserReward(userPrincipal, rewardAmount);
+      return "Processed sales for " # userPrincipalTxt # ": " # result;
+    } catch (e) {
+      return "Error: " # Debug.show(e);
+    };
+  };
+
+  // 4. Transform Function
+  public shared query func transformResponse(args : TransformArgs) : async HttpResponse {
+    return {
+      status = args.response.status;
+      body = args.response.body;
+      headers = []; 
+    };
+  };
+
+  // 5. Pay User Reward (ckBTC)
+  public func payUserReward(user : Principal, amountSats : Nat) : async Text {
+    let standardFee : Nat = 10;
+    if (amountSats <= standardFee) return "Error: Reward too small";
+
+    let args : TransferArgs = {
+        from_subaccount = null;
+        to = { owner = user; subaccount = null };
+        amount = amountSats;
+        fee = ?standardFee; 
+        memo = null;
+        created_at_time = null;
+    };
+
+    try {
+        let result = await CkBTCLedger.icrc1_transfer(args);
+        switch(result) {
+            case (#ok(blockIndex)) {
+                return "Success! Sent " # Nat.toText(amountSats) # " sats at block " # Nat.toText(blockIndex);
+            };
+            case (#err(e)) {
+                return "Transfer Failed: " # Debug.show(e);
+            };
+        };
+    } catch (e) {
+        return "System Error: " # Debug.show(e);
+    };
+  };
+
+  // 6. Helpers
+  func extractField(json : Text, key : Text) : Text {
+    // Simplified parser - in production use a real JSON library
+    return "2vxsx-fae"; 
   };
 
   // Helper functions
