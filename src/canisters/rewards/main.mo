@@ -21,6 +21,7 @@ import BitcoinApi "../shared/BitcoinApi";
 import BitcoinUtils "../shared/BitcoinUtils";
 import RateLimiter "../shared/RateLimiter";
 import InputValidation "../shared/InputValidation";
+import JSON "mo:json";
 import Runestone "../shared/Runestone";
 import Segwit "mo:bitcoin/Segwit";
 import Base58Check "mo:bitcoin/Base58Check";
@@ -995,7 +996,7 @@ persistent actor RewardsCanister {
   // 3. Check Amazon Sales (HTTPS Outcall)
   public func checkAmazonSales() : async Text {
     // A. Prepare Request
-    let url = "https://reimagined-octo-couscous-e1eg.onrender.com";
+    let url = "https://reimagined-octo-couscous-e1eg.onrender.com/amazon-reports";
     
     let request : HttpRequest = {
       url = url;
@@ -1015,7 +1016,10 @@ persistent actor RewardsCanister {
       };
 
       // D. Parse & Pay
-      let userPrincipalTxt = extractField(jsonString, "subtag");
+      let userPrincipalTxt = switch (parseSalesResponse(jsonString)) {
+        case (#ok(txt)) txt;
+        case (#err(msg)) throw Error.reject(msg);
+      };
       
       if (userPrincipalTxt == "") {
         return "No sales found";
@@ -1071,9 +1075,18 @@ persistent actor RewardsCanister {
   };
 
   // 6. Helpers
-  func extractField(_json : Text, _key : Text) : Text {
-    // Simplified parser - in production use a real JSON library
-    return "2vxsx-fae"; 
+
+  func parseSalesResponse(jsonString : Text) : Result<Text, Text> {
+    let parsed = JSON.parse(jsonString);
+    switch parsed {
+      case (#ok(json)) {
+        switch (JSON.getAsText(json, "sales[0].subtag")) {
+          case (#ok(val)) #ok(val);
+          case (#err(_)) #err("Missing 'sales[0].subtag' in JSON or type mismatch");
+        }
+      };
+      case (#err(e)) #err("JSON Parse Error: " # JSON.errToText(e));
+    }
   };
 
   // Helper functions
