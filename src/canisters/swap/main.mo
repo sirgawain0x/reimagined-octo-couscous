@@ -770,6 +770,40 @@ persistent actor SwapCanister {
     }
   };
 
+  /// Get user's SOL swap balance (from in-memory tracking)
+  /// This returns the SOL balance available for swaps in the canister
+  public shared (msg) func getUserSOLBalance() : async Result<Nat64, Text> {
+    let userId = msg.caller;
+
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+
+    // Get user's SOL balance from in-memory tracking
+    let balance : Nat64 = switch (solBalances.get(userId)) {
+      case null 0 : Nat64;
+      case (?bal) bal;
+    };
+
+    #ok(balance)
+  };
+
+  /// Get ICP balance for user
+  public func getICPBalance(userId : Principal) : async Result<Nat, Text> {
+    // Input validation
+    if (not InputValidation.validatePrincipal(userId)) {
+      return #err("Invalid principal")
+    };
+    switch (getIcpLedger()) {
+      case null #err("ICP ledger not available on this network");
+      case (?ledger) {
+        let account = getUserAccount(userId);
+        await ICPLedger.getBalance(ledger, account)
+      };
+    }
+  };
+
   /// Get SOL account info
   public shared (msg) func getSOLAccountInfo(solAddress : Text) : async Result.Result<?SolRpcClient.AccountInfo, Text> {
     let userId = msg.caller;

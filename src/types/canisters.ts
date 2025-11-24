@@ -44,6 +44,8 @@ export interface SwapCanister {
   getSwapHistory: (userId: Principal) => Promise<SwapRecord[]>
   getPools: () => Promise<Array<{ tokenA: ChainKeyToken; tokenB: ChainKeyToken; reserveA: bigint; reserveB: bigint; kLast: bigint }>>
   getSOLBalance: (solAddress: string) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  getUserSOLBalance: () => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
+  getICPBalance: (userId: Principal) => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
   getSolanaSlot: () => Promise<{ ok: bigint; err?: string } | { ok?: bigint; err: string }>
   getSolanaAddress: (keyName?: string | null) => Promise<{ ok: string; err?: string } | { ok?: string; err: string }>
   sendSOL: (toAddress: string, amountLamports: bigint, keyName?: string | null) => Promise<{ ok: string; err?: string } | { ok?: string; err: string }>

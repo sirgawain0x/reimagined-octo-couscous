@@ -297,6 +297,14 @@ export async function createSwapActor(allowAnonymous = true): Promise<SwapCanist
         ok: IDL.Nat64,
         err: IDL.Text,
       })], []),
+      getUserSOLBalance: IDL.Func([], [IDL.Variant({
+        ok: IDL.Nat64,
+        err: IDL.Text,
+      })], []),
+      getICPBalance: IDL.Func([IDL.Principal], [IDL.Variant({
+        ok: IDL.Nat,
+        err: IDL.Text,
+      })], []),
       getSolanaSlot: IDL.Func([], [IDL.Variant({
         ok: IDL.Nat64,
         err: IDL.Text,

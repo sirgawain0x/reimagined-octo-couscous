@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react"
-import { ShoppingBag, Landmark, LayoutDashboard, Wallet, Bitcoin, CheckCircle, ArrowLeftRight, LogOut, Copy, ChevronDown, CreditCard } from "lucide-react"
+import { ShoppingBag, Landmark, LayoutDashboard, Wallet, Bitcoin, CheckCircle, ArrowLeftRight, LogOut, Copy, ChevronDown, CreditCard, RefreshCw } from "lucide-react"
 import type { View } from "@/types"
 import type { AuthMethod } from "@/hooks/useICP"
 import type { Principal } from "@dfinity/principal"
 import ConnectDialog from "./ConnectDialog"
+import { useTokenBalances } from "@/hooks/useTokenBalances"
 
 interface HeaderProps {
   currentView: View
@@ -19,6 +20,7 @@ function Header({ currentView, onNavigate, isConnected, onConnect, onBitcoinConn
   const [connectDialogOpen, setConnectDialogOpen] = useState(false)
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const { ckBTC, ckETH, ICP, SOL, isLoading: balancesLoading, refresh: refreshBalances } = useTokenBalances()
   
   const navItems = [
     { id: "shop" as View, name: "Shop & Earn", icon: ShoppingBag },
@@ -49,6 +51,15 @@ function Header({ currentView, onNavigate, isConnected, onConnect, onBitcoinConn
     if (!principal) return "Not connected"
     const principalText = principal.toText()
     return `${principalText.slice(0, 5)}...${principalText.slice(-3)}`
+  }
+
+  function formatBalance(amount: bigint | null, decimals: number = 8): string {
+    if (amount === null) return "0.00"
+    const divisor = BigInt(10 ** decimals)
+    const whole = amount / divisor
+    const fractional = amount % divisor
+    const fractionalStr = fractional.toString().padStart(decimals, "0").slice(0, 4)
+    return `${whole}.${fractionalStr}`
   }
 
   async function handleCopyPrincipal() {
@@ -122,7 +133,7 @@ function Header({ currentView, onNavigate, isConnected, onConnect, onBitcoinConn
               </button>
               
               {dropdownOpen && (
-                <div className="absolute right-0 mt-2 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50">
+                <div className="absolute right-0 mt-2 w-80 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50">
                   <div className="p-4 border-b border-gray-700">
                     <p className="text-xs text-gray-400 mb-1">Connected as</p>
                     <div className="flex items-center gap-2">
@@ -136,6 +147,47 @@ function Header({ currentView, onNavigate, isConnected, onConnect, onBitcoinConn
                       >
                         <Copy className="h-4 w-4 text-gray-400" />
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Token Balances */}
+                  <div className="p-4 border-b border-gray-700">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="text-xs text-gray-400 font-semibold uppercase">Token Balances</p>
+                      <button
+                        onClick={refreshBalances}
+                        disabled={balancesLoading}
+                        className="p-1 hover:bg-gray-700 rounded transition-colors disabled:opacity-50"
+                        title="Refresh balances"
+                      >
+                        <RefreshCw className={`h-3 w-3 text-gray-400 ${balancesLoading ? "animate-spin" : ""}`} />
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-400">ckBTC</span>
+                        <span className="text-white font-mono">
+                          {balancesLoading ? "..." : formatBalance(ckBTC, 8)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-400">ckETH</span>
+                        <span className="text-white font-mono">
+                          {balancesLoading ? "..." : formatBalance(ckETH, 18)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-400">ICP</span>
+                        <span className="text-white font-mono">
+                          {balancesLoading ? "..." : formatBalance(ICP, 8)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-400">SOL</span>
+                        <span className="text-white font-mono">
+                          {balancesLoading ? "..." : formatBalance(SOL, 9)}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   

@@ -7,10 +7,12 @@ import { retry, retryWithTimeout } from "@/utils/retry"
 export interface UseSolanaResult {
   address: string | null
   balance: bigint | null
+  swapBalance: bigint | null
   isLoading: boolean
   error: string | null
   getAddress: () => Promise<void>
   getBalance: (address?: string) => Promise<void>
+  getSwapBalance: () => Promise<void>
   sendSOL: (toAddress: string, amountLamports: bigint) => Promise<{ success: boolean; signature?: string }>
   getRecentBlockhash: () => Promise<string | null>
   getSlot: () => Promise<bigint | null>
@@ -19,6 +21,7 @@ export interface UseSolanaResult {
 export function useSolana(): UseSolanaResult {
   const [address, setAddress] = useState<string | null>(null)
   const [balance, setBalance] = useState<bigint | null>(null)
+  const [swapBalance, setSwapBalance] = useState<bigint | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { principal, isConnected } = useICP()
@@ -124,6 +127,57 @@ export function useSolana(): UseSolanaResult {
         setError(err.message)
       }
       logError("Error getting SOL balance", err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function getSwapBalance() {
+    if (!isConnected || !principal) {
+      setError("Not connected")
+      return
+    }
+
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const canister = await retry(
+        () => createSwapActor(false),
+        { maxRetries: 3, initialDelayMs: 500 }
+      )
+
+      const result = await retryWithTimeout(
+        () => canister.getUserSOLBalance(),
+        30000,
+        { maxRetries: 3, initialDelayMs: 1000 }
+      ) as { ok: bigint; err?: string } | { ok?: bigint; err: string }
+
+      if ("ok" in result && result.ok !== undefined) {
+        setSwapBalance(result.ok)
+      } else if ("err" in result && result.err) {
+        // Filter out technical Candid errors
+        const isTechnicalError = result.err.toLowerCase().includes("invalid opt") ||
+                                 result.err.toLowerCase().includes("candid decode") ||
+                                 result.err.toLowerCase().includes("type mismatch")
+        
+        if (!isTechnicalError) {
+          setError(result.err)
+          logError("Failed to get SOL swap balance", new Error(result.err))
+        } else {
+          logError("Technical error getting SOL swap balance (hidden from user)", new Error(result.err))
+        }
+      }
+    } catch (error) {
+      const err = error as Error
+      const isTechnicalError = err.message.toLowerCase().includes("invalid opt") ||
+                               err.message.toLowerCase().includes("candid decode") ||
+                               err.message.toLowerCase().includes("type mismatch")
+      
+      if (!isTechnicalError) {
+        setError(err.message)
+      }
+      logError("Error getting SOL swap balance", err)
     } finally {
       setIsLoading(false)
     }
@@ -240,10 +294,12 @@ export function useSolana(): UseSolanaResult {
   return {
     address,
     balance,
+    swapBalance,
     isLoading,
     error,
     getAddress,
     getBalance,
+    getSwapBalance,
     sendSOL,
     getRecentBlockhash,
     getSlot,
