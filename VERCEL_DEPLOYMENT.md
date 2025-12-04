@@ -59,8 +59,10 @@ VITE_VALIDATION_CLOUD_API_KEY=your_api_key_here
 VITE_VALIDATION_CLOUD_SOLANA_DEVNET=your_devnet_endpoint
 VITE_VALIDATION_CLOUD_SOLANA_MAINNET=your_mainnet_endpoint
 
-# Amazon Affiliate Link (optional)
+# Affiliate Links (optional)
 VITE_AMAZON_AFFILIATE_LINK=your_affiliate_link
+VITE_WALMART_AFFILIATE_LINK=your_walmart_affiliate_link
+VITE_EBAY_AFFILIATE_LINK=your_ebay_affiliate_link
 ```
 
 ## Deployment Steps

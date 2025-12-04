@@ -10,9 +10,9 @@ import { AFFILIATE_LINKS } from "@/config/env"
 // Fallback stores if canister is not available
 const fallbackStores: Store[] = [
   { id: 1, name: "Amazon", reward: 5, logo: "https://placehold.co/100x100/1e293b/ffffff?text=AMZN", url: AFFILIATE_LINKS.amazon },
-  { id: 2, name: "Walmart", reward: 3.5, logo: "https://placehold.co/100x100/1e293b/ffffff?text=WMT" },
+  { id: 2, name: "Walmart", reward: 3.5, logo: "https://placehold.co/100x100/1e293b/ffffff?text=WMT", url: AFFILIATE_LINKS.walmart },
   { id: 3, name: "Nike", reward: 8, logo: "https://placehold.co/100x100/1e293b/ffffff?text=NIKE" },
-  { id: 4, name: "eBay", reward: 2, logo: "https://placehold.co/100x100/1e293b/ffffff?text=EBAY" },
+  { id: 4, name: "eBay", reward: 2, logo: "https://placehold.co/100x100/1e293b/ffffff?text=EBAY", url: AFFILIATE_LINKS.ebay },
 ]
 
 export function useRewards() {
