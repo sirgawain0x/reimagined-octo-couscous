@@ -24,7 +24,7 @@ export const VALIDATION_CLOUD_CONFIG = {
 } as const
 
 export const AFFILIATE_LINKS = {
-  amazon: import.meta.env.VITE_AMAZON_AFFILIATE_LINK || "https://amzn.to/4piZuMy",
+  amazon: import.meta.env.VITE_AMAZON_AFFILIATE_LINK || "https://amzn.to/3KG7zfG",
   walmart: import.meta.env.VITE_WALMART_AFFILIATE_LINK || "https://goto.walmart.com/c/5898735/1398372/16662?sourceid=imp_000011112222333344&veh=aff&u=https%3A%2F%2Fwww.walmart.com",
   ebay: import.meta.env.VITE_EBAY_AFFILIATE_LINK || "https://ebay.us/XS4KJV",
 } as const
