@@ -3,7 +3,6 @@ import { createSwapActor } from "@/services/canisters"
 import { logError } from "@/utils/logger"
 import { useICP } from "./useICP"
 import { retry, retryWithTimeout } from "@/utils/retry"
-import type { Principal } from "@dfinity/principal"
 
 export interface TokenBalances {
   ckBTC: bigint | null
