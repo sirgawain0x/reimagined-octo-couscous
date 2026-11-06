@@ -26,7 +26,7 @@ const mockUseICP = vi.fn(() => ({
   disconnect: vi.fn(),
 }))
 
-vi.mock('./useICP', () => ({
+vi.mock('../useICP', () => ({
   useICP: () => mockUseICP(),
 }))
 
@@ -108,7 +108,7 @@ describe('useLending', () => {
     const depositResult = await result.current.deposit('btc', 1000)
 
     expect(depositResult).toBe(false)
-    expect(result.current.error).toBe(errorMessage)
+    await waitFor(() => expect(result.current.error).toBe(errorMessage))
   })
 
   it('should handle withdrawal successfully', async () => {
@@ -276,7 +276,7 @@ describe('useLending', () => {
     const withdrawResult = await result.current.withdraw('btc', 500, 'test-address')
 
     expect(withdrawResult).toBe(false)
-    expect(result.current.error).toBe(errorMessage)
+    await waitFor(() => expect(result.current.error).toBe(errorMessage))
   })
 
   it('should handle borrow errors', async () => {
@@ -294,7 +294,7 @@ describe('useLending', () => {
     const borrowResult = await result.current.borrow('btc', 1000, 'eth', 2000)
 
     expect(borrowResult).toBe(false)
-    expect(result.current.error).toBe(errorMessage)
+    await waitFor(() => expect(result.current.error).toBe(errorMessage))
   })
 
   it('should handle repay errors', async () => {
@@ -312,7 +312,7 @@ describe('useLending', () => {
     const repayResult = await result.current.repay(BigInt(1), 500)
 
     expect(repayResult).toBe(false)
-    expect(result.current.error).toBe(errorMessage)
+    await waitFor(() => expect(result.current.error).toBe(errorMessage))
   })
 
   it('should refresh data', async () => {

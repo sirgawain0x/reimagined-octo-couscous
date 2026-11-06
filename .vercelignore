@@ -33,3 +33,10 @@ dfx.json
 .env.development.local
 .env.production.local
 
+
+# Legacy services, local fixtures, and caches are outside the storefront build.
+.mops/
+.vite/
+proxy-server/
+src/canisters/
+tests/

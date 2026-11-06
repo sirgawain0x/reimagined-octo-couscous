@@ -1,262 +1,36 @@
-name: CI
-
+name: Bit Rewards release checks
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+permissions:
+  contents: read
 
 jobs:
-  test:
-    name: Run Tests
+  storefront:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm test -- --run
+      - run: npm run build
+      - run: npx --no-install playwright-core install --with-deps chromium
+      - run: node e2e/storefront.mjs
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run linter
-        run: npm run lint || true
-
-      - name: Run unit tests
-        run: npm test -- --run --coverage
-
-      - name: Generate coverage report
-        run: npm test -- --run --coverage --reporter=json --reporter=html --reporter=text
-
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
-        if: always()
-        with:
-          files: ./coverage/coverage-final.json
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-      - name: Upload coverage HTML
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-report
-          path: coverage/
-          retention-days: 30
-
-  build:
-    name: Build Application
+  rewards-pilot:
     runs-on: ubuntu-latest
-    needs: test
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build application
-        run: npm run build
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-  e2e:
-    name: E2E Tests
-    runs-on: ubuntu-latest
-    needs: build
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
-
-      - name: Start dfx (if available)
-        run: |
-          if command -v dfx &> /dev/null; then
-            dfx start --background || true
-          fi
-        continue-on-error: true
-
-      - name: Run E2E tests
-        run: npx playwright test
-        continue-on-error: true
-
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: playwright-report
-          path: playwright-report/
-          retention-days: 30
-
-  canister-tests:
-    name: Canister Tests
-    runs-on: ubuntu-latest
-    env:
-      VITE_CANISTER_ID_REWARDS: rrkah-fqaaa-aaaaa-aaaaq-cai
-      VITE_CANISTER_ID_PORTFOLIO: rrkah-fqaaa-aaaaa-aaaaq-cai
-      VITE_CANISTER_ID_SWAP: rrkah-fqaaa-aaaaa-aaaaq-cai
-      VITE_CANISTER_ID_LENDING: rrkah-fqaaa-aaaaa-aaaaq-cai
-      MOPS_VERSION: v1.12.0
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup dfx
-        uses: dfinity/setup-dfx@main
-        with:
-          version: '0.20.0'
-        continue-on-error: true
-
-      - name: Install dfx (fallback if action fails)
-        run: |
-          if ! command -v dfx &> /dev/null; then
-            echo "DFX not found after setup action, trying manual installation..."
-            curl --fail --silent --show-error --location --retry 10 \
-              --connect-timeout 5 --max-time 20 --retry-connrefused \
-              https://internetcomputer.org/install.sh | sh -s -- --yes || {
-              echo "Failed to download or execute install script"
-              exit 1
-            }
-          fi
-          dfx --version
-
-      - name: Install Motoko Package Manager (mops)
-        env:
-          # Set this in your workflow or repository secrets to a known mops release tag, e.g. vX.Y.Z
-          # If empty, the step will try "latest" heuristics (less reliable).
-          MOPS_VERSION: ${{ env.MOPS_VERSION || '' }}
-        run: |
-          set -euo pipefail
-
-          sudo apt-get update -y
-          sudo apt-get install -y curl jq
-
-          installed=false
-
-          # If a specific release tag is provided, prefer the pinned download (recommended)
-          if [ -n "${MOPS_VERSION:-}" ]; then
-            echo "MOPS_VERSION provided: ${MOPS_VERSION}"
-            PINNED_URL="https://github.com/dfinity/mops/releases/download/${MOPS_VERSION}/mops-x86_64-linux"
-            echo "Attempting pinned download: $PINNED_URL"
-            if curl -fsSL "$PINNED_URL" -o /tmp/mops; then
-              chmod +x /tmp/mops
-              sudo mv /tmp/mops /usr/local/bin/mops
-              installed=true
-              echo "Installed mops from pinned release ${MOPS_VERSION}"
-            else
-              echo "Pinned download failed for $PINNED_URL"
-            fi
-          fi
-
-          # If no pinned version or pinned download failed, try common "latest" redirect paths and API fallback
-          if [ "$installed" = false ]; then
-            try_urls=(
-              "https://github.com/dfinity/mops/releases/latest/download/mops-x86_64-linux"
-              "https://github.com/dfinity/mops/releases/latest/download/mops-amd64-linux"
-              "https://github.com/dfinity/mops/releases/latest/download/mops-linux"
-            )
-
-            for url in "${try_urls[@]}"; do
-              echo "Trying direct download: $url"
-              if curl -fsSL "$url" -o /tmp/mops; then
-                chmod +x /tmp/mops
-                sudo mv /tmp/mops /usr/local/bin/mops
-                installed=true
-                echo "Installed mops from $url"
-                break
-              else
-                echo "Direct download failed for $url"
-              fi
-            done
-
-            if [ "$installed" = false ]; then
-              echo "Direct downloads failed — falling back to GitHub API (may be rate limited / return 404)"
-              LATEST_JSON=$(curl -sS https://api.github.com/repos/dfinity/mops/releases/latest || true)
-              if [ -n "$LATEST_JSON" ]; then
-                echo "Parsing release JSON (truncated):"
-                echo "$LATEST_JSON" | head -c 800
-                MOPS_URL=$(echo "$LATEST_JSON" | jq -r '.assets[]? | select(.name|test("linux";"i") and (.name|test("x86_64|amd64";"i"))) | .browser_download_url' | head -n1 || true)
-                if [ -z "$MOPS_URL" ]; then
-                  MOPS_URL=$(echo "$LATEST_JSON" | jq -r '.assets[]? | select(.name|test("linux";"i")) | .browser_download_url' | head -n1 || true)
-                fi
-                if [ -n "$MOPS_URL" ] && curl -fsSL "$MOPS_URL" -o /tmp/mops; then
-                  chmod +x /tmp/mops
-                  sudo mv /tmp/mops /usr/local/bin/mops
-                  installed=true
-                  echo "Installed mops from API asset: $MOPS_URL"
-                else
-                  echo "No suitable mops asset found in release. Available asset names (first 20):"
-                  echo "$LATEST_JSON" | jq -r '.assets[]?.name' | head -n20 || true
-                fi
-              else
-                echo "GitHub API fetch returned empty or failed (possible 404 or network issue)."
-              fi
-            fi
-          fi
-
-          if [ "$installed" = false ]; then
-            echo ""
-            echo "ERROR: Unable to install mops."
-            echo "Recommended actions:"
-            echo "- Pin MOPS_VERSION in this workflow to a working release tag. Find tags here:"
-            echo "  https://github.com/dfinity/mops/releases"
-            echo "- Or vendor the mops binary into your repo or an internal artifact server and download from there."
-            echo "- If you expect the 'latest' endpoint to work, inspect the releases page to confirm assets exist."
-            exit 1
-          fi
-
-      - name: Check mops installation
-        run: mops --version
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Start dfx
-        run: dfx start --background
-
-      - name: Deploy canisters
-        run: dfx deploy --no-wallet
-
-      - name: Run canister integration tests
-        run: npm test -- canister-interactions
-        continue-on-error: true
-
-      - name: Stop dfx
-        run: dfx stop || true
-
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/rewards-pilot/package-lock.json
+      - run: npm ci --prefix tests/rewards-pilot
+      - run: npm test --prefix tests/rewards-pilot

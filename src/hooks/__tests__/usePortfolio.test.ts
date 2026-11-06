@@ -22,7 +22,7 @@ const mockUseICP = vi.fn(() => ({
   disconnect: vi.fn(),
 }))
 
-vi.mock('./useICP', () => ({
+vi.mock('../useICP', () => ({
   useICP: () => mockUseICP(),
 }))
 
@@ -83,7 +83,7 @@ describe('usePortfolio', () => {
   })
 
   it('should not load portfolio when not connected', async () => {
-    mockUseICP.mockReturnValueOnce({
+    mockUseICP.mockReturnValue({
       principal: null,
       isConnected: false,
       isLoading: false,
@@ -237,7 +237,7 @@ describe('usePortfolio', () => {
       totalLended: 500,
       totalBorrowed: 200,
       assets: [
-        { name: 'Bitcoin', symbol: 'BTC', amount: BigInt(500000000), value: 1000 }, // 0.5 BTC
+        { name: 'Bitcoin', symbol: 'BTC', amount: BigInt(50000000), value: 1000 }, // 0.5 BTC
       ],
     }
     mockActor.getPortfolio.mockResolvedValue(mockPortfolio)

@@ -1,15 +1,39 @@
-# ICP Shopping Rewards Platform
+# Bit Rewards
 
-A decentralized shopping rewards platform built on the Internet Computer Protocol (ICP) that allows users to earn Bitcoin rewards while shopping and provides lending services for BTC, ETH, and SOL.
+The release candidate is an affiliate storefront for Amazon, Walmart, and eBay. Visitors can shop without signing in. The storefront reads its merchant links from the build configuration and never calls the legacy rewards, lending, swap, or portfolio canisters. Internet Identity is optional.
 
-## Features
+## Storefront release
 
-- 🛍️ **Shop & Earn**: Browse partner stores and earn Bitcoin rewards on purchases
-- 💰 **Crypto Lending**: Lend Bitcoin, Ethereum, and Solana to earn interest
-- 🔄 **Token Swaps**: Swap ckBTC, ckETH, and ICP with Chain-Key integration
-- 📊 **Portfolio Dashboard**: Track your assets, rewards, and lending positions
-- 🔐 **Authentication**: Sign in with Internet Identity or Bitcoin wallet (Sign-in with Bitcoin)
-- 🎨 **Modern UI**: Built with React, TypeScript, Tailwind CSS, and Next UI
+Use Node 22 and the committed dependency lockfiles:
+
+```sh
+npm ci
+npm test -- --run
+npm audit --omit=dev --audit-level=high
+npm run build
+npx --no-install playwright-core install chromium
+node e2e/storefront.mjs
+npm ci --prefix tests/rewards-pilot
+npm test --prefix tests/rewards-pilot
+```
+
+The browser test serves the built output with the intended security headers from `config/storefront-headers.json`. Verify those headers separately on the Render preview. It intercepts merchant and identity-provider handoffs without placing an order or signing into a live account. Confirm the real Internet Identity return flow and affiliate attribution on an approved preview origin before production promotion.
+
+The production build defaults to the IC network and the default Internet Identity provider. The affiliate-only storefront requires no treasury credentials, merchant secrets, or canister IDs. Set affiliate overrides in the host's build environment if the campaign uses different approved URLs. Confirm the short links belong to the intended affiliate accounts. The production host is the existing Bit Rewards service on Render. Confirm its service type, deployed commit, linked branch and auto-deploy setting in the Render dashboard before pushing. For a Render Static Site, use the repository root, build with `npm ci && npm run build`, publish `dist`, and apply the headers from `config/storefront-headers.json` to `/*` in the service settings. For a Render Web Service, verify its current start command serves that same build and sends those headers. The repository's `proxy-server` instructions apply to a separate backend. Validate a preview and obtain approval before promoting or pushing to an auto-deployed production branch. A frontend rollback should restore the previous approved storefront or maintenance page; avoid pointing users to legacy financial features.
+
+## Paid rewards
+
+The PocketIC pilot uses signed synthetic orders and nonredeemable units. See [pilot tests](tests/rewards-pilot/README.md). The legacy mainnet deployment requires a separate release and custody review. Run `node scripts/inspect-mainnet.mjs` for fresh certified controller and module metadata, published interfaces, and default-account ckBTC balances. This public check cannot establish who controls each identity, native BTC balances, or cycle runway.
+
+Before authorizing paid rewards:
+- Reconcile native BTC addresses, derivation paths, historical transfers, token subaccounts, user liabilities, and controller recovery with the CTO. Preserve legacy records before upgrading.
+- Obtain authenticated purchase, refund and cancellation records plus attribution from the merchant. Reconcile a trial batch to merchant records.
+- Select the payout asset, rate, caps, hold period and budget. Implement and test a separate manually approved payout path, including reconciliation after an ambiguous transfer.
+- Revoke the exposed RPC credentials with approval, verify service activity, and prove a low-cycle alert reaches its owner.
+
+## Historical implementation notes
+
+The material below describes the earlier multi-canister system. Its deployment commands are outside the storefront release process.
 
 ## Prerequisites
 

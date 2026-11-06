@@ -9,6 +9,7 @@ export default defineConfig({
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
+      'tests/rewards-pilot/**', // This suite uses node:test and PocketIC.
       '**/e2e/**', // Exclude E2E tests (they require Playwright)
     ],
     env: {

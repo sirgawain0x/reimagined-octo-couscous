@@ -22,6 +22,11 @@ import {
 describe('ICP service', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.doMock('@/config/env', () => ({
+      ICP_CONFIG: { network: 'local', internetIdentityUrl: 'https://identity.ic0.app' },
+      host: 'http://localhost:4943',
+      isLocalNetwork: true,
+    }))
   })
 
   describe('getAgent', () => {
@@ -173,6 +178,19 @@ describe('ICP service', () => {
         delete process.env.VITE_INTERNET_IDENTITY_URL
       }
       await vi.resetModules()
+    })
+
+    it('rejects a stored identity whose session is no longer authenticated', async () => {
+      vi.resetModules()
+      const client = {
+        isAuthenticated: vi.fn().mockResolvedValue(false),
+        getIdentity: vi.fn(() => ({ getPrincipal: () => createMockPrincipal() })),
+      }
+      vi.mocked(AuthClient.create).mockResolvedValue(client as any)
+      const service = await import('../icp')
+      expect(await service.getIdentity()).toBeNull()
+      expect(client.getIdentity).not.toHaveBeenCalled()
+      expect(service.getAgent()).toBeNull()
     })
 
     it('should return null if not authenticated', async () => {

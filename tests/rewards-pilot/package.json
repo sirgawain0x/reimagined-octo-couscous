@@ -1,0 +1,11 @@
+{
+  "name": "bit-rewards-local-pilot",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test pilot.test.mjs" },
+  "devDependencies": {
+    "@dfinity/pic": "0.25.0",
+    "@icp-sdk/core": "6.1.1",
+    "motoko": "5.3.0"
+  }
+}

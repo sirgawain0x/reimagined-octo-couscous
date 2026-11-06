@@ -24,7 +24,7 @@ const mockUseICP = vi.fn(() => ({
   disconnect: vi.fn(),
 }))
 
-vi.mock('./useICP', () => ({
+vi.mock('../useICP', () => ({
   useICP: () => mockUseICP(),
 }))
 
@@ -152,7 +152,7 @@ describe('useSwap', () => {
   })
 
   it('should require authentication for executeSwap', async () => {
-    mockUseICP.mockReturnValueOnce({
+    mockUseICP.mockReturnValue({
       principal: null,
       isConnected: false,
       isLoading: false,
@@ -202,7 +202,7 @@ describe('useSwap', () => {
   })
 
   it('should return empty history when not connected', async () => {
-    mockUseICP.mockReturnValueOnce({
+    mockUseICP.mockReturnValue({
       principal: null,
       isConnected: false,
       isLoading: false,
